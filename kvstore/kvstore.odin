@@ -50,7 +50,7 @@ write :: proc (store: ^KVStore, key: string, value: string) -> bool {
     }
 
     for line in lines{
-        entry, err := strings.split(line, ":")
+        entry, err := strings.split_n(line, ":", 2)
         if err != runtime.Allocator_Error.None{
             //TODO: better message
             fmt.println("Something went wrong : %v", err)
@@ -64,10 +64,12 @@ write :: proc (store: ^KVStore, key: string, value: string) -> bool {
 
 
     n, e := os.write_strings(store.file, key, KEY_VAL_DELIMITER, value, ENTRY_DELIMITER)
+    if e != os.ERROR_NONE{
+        fmt.println("Could not write key ", key, ": value " , value , " \n Error: ", e)
+        return false
+    }
     os.flush(store.file)
     
-
-
     return true
 }
 
