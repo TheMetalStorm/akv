@@ -6,17 +6,11 @@ import "core:strings"
 import "base:runtime"
 
 // stored in file as "key1:value1;key2:value2"
+// TODO: zero copy version where map key and val are just slices into file data
 KVStore :: struct {
-    filepath: string
-    // TODO: cache
-    // TODO: compress and decompress data?
-    // TODO: make thread safe
-}
-
-KVEntry :: struct{
-    key: string,
-    value: string,
-    start_pos: int
+    filepath: string,
+    // TODO: dealloc indices and strings 
+    data: map[string]string
 }
 
 KEY_VAL_DELIMITER : string : ":"
@@ -33,29 +27,37 @@ get_file :: proc(store: ^KVStore) -> ^os.File {
 
 init :: proc(filepath: string) -> (KVStore, bool) {
     
-    store: KVStore = KVStore{ filepath}
+    store: KVStore = KVStore{strings.clone(filepath), {}}
+
+    ok := build_index(&store)
+    if !ok {
+        fmt.println("Could not build index for store at", store.filepath)
+        return {}, false
+    }
 
     return store, true
 }
 
-dealloc_entry :: proc(entry: KVEntry) {
-    delete(entry.key, context.allocator)
-    delete(entry.value, context.allocator)
+dealloc :: proc(store: ^KVStore){
+
+    delete(store.filepath)
+    for key, val in store.data{
+        delete(key)
+        delete(val)
+    }
+    delete(store.data)
+    
 }
 
-// get_KVEntry looks up a key in the database file.
-//
-// If the key is found, it returns a KVEntry containing newly allocated strings 
-// cloned from the file buffer. 
+build_index :: proc(store: ^KVStore) -> bool{
 
-// Returns:
-// - entry: The matching record. **The caller is responsible for freeing this 
-//   memory by calling `dealloc_entry(entry, allocator)`.**
-get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
+    file := get_file(store)
+    defer os.close(file)
+
     data, read_err := os.read_entire_file(file, context.allocator)
     defer delete(data, context.allocator)
     if read_err != os.ERROR_NONE{
-        return {}, false
+        return false
     }
     data_str := string(data)
     lines, err := strings.split(data_str, ";")
@@ -63,145 +65,98 @@ get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
 
     if err != runtime.Allocator_Error.None{
         fmt.println("Something went wrong parsing KV store file. Error: ", err)
-        return {}, false
+        return  false
 
     }
-
-    key_start_pos := 0
 
     for line in lines{
         entry, err := strings.split_n(line, ":", 2)
         if err != runtime.Allocator_Error.None{
             fmt.println("Something went wrong parsing KV store file. Error: ", err)
-            return {}, false
+            return false
         }
 
         if len(entry) < 2 {
             delete(entry, context.allocator)
             continue
         }
+        key := strings.clone(entry[0])
+        value := strings.clone(entry[1])
 
-        
-        if entry[0] == key{
+        store.data[key] = value
 
-            ret := KVEntry{ strings.clone(entry[0]), strings.clone(entry[1]), key_start_pos}
-            delete(entry, context.allocator)
-            return ret, true
-
-        }
-        key_start_pos += len(line) + 1
         delete(entry, context.allocator)
 
     }
-    return {}, false
 
+    return true
 
 }
 
+// key_exists looks up if key exists in database.
+
+key_exists :: proc(store: ^KVStore, key: string) -> bool {
+    _, ok := store.data[key]
+    return ok
+}
+
+// get_entry looks up a key in the database file.
+//
+// If the key is found, it returns a value string 
+// cloned from the file buffer. 
+
+// Returns:
+// - value: The matching value string. Borrowed, do not free. 
+// - found: If the key exists in the store
+get_entry :: proc(store: ^KVStore , key: string) -> (string, bool) {
+    return store.data[key]
+}
+
+// Returns:
+// - value: The matching value string. **The caller is responsible for freeing this 
+// - found: If the key exists in the store
+read :: proc (store: ^KVStore, key: string) -> (string, bool) {
+    value, ok := store.data[key]
+    if ok{
+        return strings.clone(value), true
+    }
+    return "", false
+
+}
+
+// write inserts a key-value pair into the store.
+//
+// Note: This procedure TAKES OWNERSHIP of the `key` and `value` strings. 
+// Do not modify or free them after passing them in. The store will handle 
+// their deallocation inside `dealloc`.
 write :: proc (store: ^KVStore, key: string, value: string) -> bool {
-    file := get_file(store)
-    defer os.close(file)
-    entry, found := get_KVEntry(file, key)
+
+    found := key_exists(store, key)
     
     if found {
         fmt.println("Key", key, "already exists in store")
-        dealloc_entry(entry)
         return false
     }
 
-
-    n, e := os.write_strings(file, key, KEY_VAL_DELIMITER, value, ENTRY_DELIMITER)
-    if e != os.ERROR_NONE{
-        fmt.println("Could not write key", key, ": value" , value , " \n Error: ", e)
-        return false
-    }
-
-    fmt.println("Wrote Key", key)
+    store.data[strings.clone(key)] = strings.clone(value)
     return true
+
 }
 
-read :: proc (store: ^KVStore, key: string) -> (KVEntry, bool) {
+// Write the updated data in the Store to file
+sync :: proc (store: ^KVStore) -> bool {
 
     file := get_file(store)
     defer os.close(file)
-    entry, found := get_KVEntry(file, key)
-    if found {
-        fmt.println("Value for Key", key, "found")    
-        return entry, true
-    }
-    dealloc_entry(entry)
-    fmt.println("Value for Key", key, "not found")
-    return {}, false
-
-}
-
-del :: proc{
-    delete_by_key,
-    delete_by_kv_entry
-}
-
-
-
-delete_by_key :: proc (store: ^KVStore, key: string) -> bool{
-    file := get_file(store)
-    defer os.close(file)
-    val, found := get_KVEntry(file, key)
-    if !found {
-        fmt.println("Value for Key", key, "not found")    
-        return false
-    }
-
-    return delete_by_kv_entry(store, val)
-}
-
-delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
-    defer dealloc_entry(kv_entry)
-    file := get_file(store)
-    defer os.close(file)
-    data, read_err := os.read_entire_file(file, context.allocator)
-    defer delete(data, context.allocator)
-
-    if read_err != os.ERROR_NONE{
-        return  false
-    }
-    data_str := string(data)
-
-    lines, err := strings.split(data_str, ";")
-    defer delete(lines, context.allocator)
-    if err != runtime.Allocator_Error.None{
-        fmt.println("Something went wrong parsing KV store file. Error: ", err)
-        return  false
-
-    }
 
     new_lines := strings.builder_make_none()
     defer strings.builder_destroy(&new_lines)
 
-    for line in lines{
-        if line == ""{
-            continue
-        }
-        entry, err := strings.split_n(line, ":", 2)
-        
-        if err != runtime.Allocator_Error.None{
-            fmt.println("Something went wrong parsing KV store file. Error: ", err)
-            delete(entry, context.allocator)
-
-            return  false
-        }
-        
-        if len(entry) < 2 {
-            delete(entry, context.allocator)
-            continue
-        }
-
-
-        if strings.compare(entry[0], kv_entry.key) != 0{
-            strings.write_string(&new_lines, line)
-            strings.write_string(&new_lines, ENTRY_DELIMITER)
-        }
-        delete(entry, context.allocator)
-
+    for key, val in store.data {
+        strings.write_string(&new_lines, key)
+        strings.write_string(&new_lines, KEY_VAL_DELIMITER)
+        strings.write_string(&new_lines, val)
+        strings.write_string(&new_lines, ENTRY_DELIMITER)
     }
 
     _, seek_err := os.seek(file, 0, .Start)
@@ -220,9 +175,20 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
         return  false
     }
 
-    fmt.println("Deleted key", kv_entry.key, "from store")
-
-
     return true
-}
 
+}
+// del removes a key-value pair from the store.
+// Warning: This procedure does not free the memory for the key and value strings.
+
+del :: proc (store: ^KVStore, key: string) -> bool{
+    val, found := read(store, key)
+    if !found {
+        fmt.println("Value for Key", key, "not found")    
+        return false
+    }
+    delete(val)
+    delete_key(&store.data, key)
+    return true
+
+}
