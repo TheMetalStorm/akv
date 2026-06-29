@@ -43,6 +43,7 @@ init :: proc(filepath: string) -> (KVStore, bool) {
 //TODO very heavy, maybe one method to check if key exists and one to actually get val? research
 get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
     data, read_err := os.read_entire_file(file, context.allocator)
+    defer free(&data, context.allocator)
     if read_err != os.ERROR_NONE{
         return {}, false
     }
@@ -96,6 +97,20 @@ write :: proc (store: ^KVStore, key: string, value: string) -> bool {
     return true
 }
 
+read :: proc (store: ^KVStore, key: string) -> (KVEntry, bool) {
+
+    file := get_file(store)
+    defer os.close(file)
+    entry, found := get_KVEntry(file, key)
+    if found {
+        fmt.println("Value for Key", key, "found")    
+        return entry, true
+    }
+    fmt.println("Value for Key", key, "not found")
+    return {}, false
+
+}
+
 delete :: proc{
     delete_by_key,
     delete_by_kv_entry
@@ -119,6 +134,8 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
     file := get_file(store)
     defer os.close(file)
     data, read_err := os.read_entire_file(file, context.allocator)
+    defer free(&data, context.allocator)
+
     if read_err != os.ERROR_NONE{
         return  false
     }
@@ -131,7 +148,6 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
     }
 
     new_lines := strings.builder_make_none()
-    fmt.println(strings.to_string(new_lines))
     for line in lines{
         if line == ""{
             continue
@@ -142,34 +158,31 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
             fmt.println("Something went wrong parsing KV store file. Error: ", err)
             return  false
         }
-        fmt.println(entry[0])
-        fmt.println(kv_entry.key)
 
         if strings.compare(entry[0], kv_entry.key) != 0{
-            fmt.println(line)
             strings.write_string(&new_lines, line)
             strings.write_string(&new_lines, ENTRY_DELIMITER)
         }
     }
 
-    os.seek(file, 0, .Start)
-    os.truncate(file, 0)
-    fmt.println(strings.to_string(new_lines))
-    os.write_string(file,   strings.to_string(new_lines))
+    _, seek_err := os.seek(file, 0, .Start)
+    if seek_err != os.ERROR_NONE{
+        fmt.println("Something went wrong seeking in KV store file. Error: ", seek_err)
+        return  false
+    }
+    trunc_err := os.truncate(file, 0)
+    if trunc_err != os.ERROR_NONE{
+        fmt.println("Something went wrong truncating KV store file. Error: ", trunc_err)
+        return  false
+    }
+    _, write_err := os.write_string(file, strings.to_string(new_lines))
+    if write_err != os.ERROR_NONE{
+        fmt.println("Something went wrong writing to KV store file. Error: ", write_err)
+        return  false
+    }
+
+    fmt.println("Deleted key", kv_entry.key, "from store")
 
     return true
 }
 
-read :: proc (store: ^KVStore, key: string) -> (KVEntry, bool) {
-
-    file := get_file(store)
-    defer os.close(file)
-    entry, found := get_KVEntry(file, key)
-    if found {
-        fmt.println("Value for Key", key, "found")    
-        return entry, true
-    }
-    fmt.println("Value for Key", key, "not found")
-    return {}, false
-
-}
