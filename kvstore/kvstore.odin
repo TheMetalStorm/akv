@@ -38,17 +38,22 @@ init :: proc(filepath: string) -> (KVStore, bool) {
     return store, true
 }
 
-
+dealloc_entry :: proc(entry: KVEntry) {
+    delete(entry.key, context.allocator)
+    delete(entry.value, context.allocator)
+}
 
 //TODO very heavy, maybe one method to check if key exists and one to actually get val? research
 get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
     data, read_err := os.read_entire_file(file, context.allocator)
-    defer free(&data, context.allocator)
+    defer delete(data, context.allocator)
     if read_err != os.ERROR_NONE{
         return {}, false
     }
-    data_str := strings.clone_from_bytes(data)
+    data_str := string(data)
     lines, err := strings.split(data_str, ";")
+    defer delete(lines, context.allocator)
+
     if err != runtime.Allocator_Error.None{
         fmt.println("Something went wrong parsing KV store file. Error: ", err)
         return {}, false
@@ -59,16 +64,26 @@ get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
 
     for line in lines{
         entry, err := strings.split_n(line, ":", 2)
-        
         if err != runtime.Allocator_Error.None{
             fmt.println("Something went wrong parsing KV store file. Error: ", err)
             return {}, false
         }
+
+        if len(entry) < 2 {
+            delete(entry, context.allocator)
+            continue
+        }
+
         
         if entry[0] == key{
-            return { entry[0], entry[1], key_start_pos}, true
+
+            ret := KVEntry{ strings.clone(entry[0]), strings.clone(entry[1]), key_start_pos}
+            delete(entry, context.allocator)
+            return ret, true
+
         }
         key_start_pos += len(line) + 1
+        delete(entry, context.allocator)
 
     }
     return {}, false
@@ -79,10 +94,11 @@ get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
 write :: proc (store: ^KVStore, key: string, value: string) -> bool {
     file := get_file(store)
     defer os.close(file)
-    _, found := get_KVEntry(file, key)
+    entry, found := get_KVEntry(file, key)
     
     if found {
         fmt.println("Key", key, "already exists in store")
+        dealloc_entry(entry)
         return false
     }
 
@@ -106,12 +122,13 @@ read :: proc (store: ^KVStore, key: string) -> (KVEntry, bool) {
         fmt.println("Value for Key", key, "found")    
         return entry, true
     }
+    dealloc_entry(entry)
     fmt.println("Value for Key", key, "not found")
     return {}, false
 
 }
 
-delete :: proc{
+del :: proc{
     delete_by_key,
     delete_by_kv_entry
 }
@@ -131,16 +148,19 @@ delete_by_key :: proc (store: ^KVStore, key: string) -> bool{
 }
 
 delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
+    defer dealloc_entry(kv_entry)
     file := get_file(store)
     defer os.close(file)
     data, read_err := os.read_entire_file(file, context.allocator)
-    defer free(&data, context.allocator)
+    defer delete(data, context.allocator)
 
     if read_err != os.ERROR_NONE{
         return  false
     }
-    data_str := strings.clone_from_bytes(data)
+    data_str := string(data)
+
     lines, err := strings.split(data_str, ";")
+    defer delete(lines, context.allocator)
     if err != runtime.Allocator_Error.None{
         fmt.println("Something went wrong parsing KV store file. Error: ", err)
         return  false
@@ -148,6 +168,8 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
     }
 
     new_lines := strings.builder_make_none()
+    defer strings.builder_destroy(&new_lines)
+
     for line in lines{
         if line == ""{
             continue
@@ -156,13 +178,23 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
         
         if err != runtime.Allocator_Error.None{
             fmt.println("Something went wrong parsing KV store file. Error: ", err)
+            delete(entry, context.allocator)
+
             return  false
         }
+        
+        if len(entry) < 2 {
+            delete(entry, context.allocator)
+            continue
+        }
+
 
         if strings.compare(entry[0], kv_entry.key) != 0{
             strings.write_string(&new_lines, line)
             strings.write_string(&new_lines, ENTRY_DELIMITER)
         }
+        delete(entry, context.allocator)
+
     }
 
     _, seek_err := os.seek(file, 0, .Start)
@@ -182,6 +214,7 @@ delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
     }
 
     fmt.println("Deleted key", kv_entry.key, "from store")
+
 
     return true
 }
