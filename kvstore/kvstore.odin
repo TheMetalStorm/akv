@@ -43,7 +43,14 @@ dealloc_entry :: proc(entry: KVEntry) {
     delete(entry.value, context.allocator)
 }
 
-//TODO very heavy, maybe one method to check if key exists and one to actually get val? research
+// get_KVEntry looks up a key in the database file.
+//
+// If the key is found, it returns a KVEntry containing newly allocated strings 
+// cloned from the file buffer. 
+
+// Returns:
+// - entry: The matching record. **The caller is responsible for freeing this 
+//   memory by calling `dealloc_entry(entry, allocator)`.**
 get_KVEntry :: proc(file: ^os.File, key: string) -> (KVEntry, bool) {
     data, read_err := os.read_entire_file(file, context.allocator)
     defer delete(data, context.allocator)
