@@ -96,19 +96,26 @@ write :: proc (store: ^KVStore, key: string, value: string) -> bool {
     return true
 }
 
-// delete :: proc (store: ^KVStore, key: string) -> bool{
-//         file := get_file(store)
-//     defer os.close(file)
-//     val, found := get_KVEntry(file, key)
-//     if !found {
-//         fmt.println("Value for Key", key, "not found")    
-//         return false
-//     }
+delete :: proc{
+    delete_by_key,
+    delete_by_kv_entry
+}
 
-//     return true
-// }
 
-delete :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
+
+delete_by_key :: proc (store: ^KVStore, key: string) -> bool{
+    file := get_file(store)
+    defer os.close(file)
+    val, found := get_KVEntry(file, key)
+    if !found {
+        fmt.println("Value for Key", key, "not found")    
+        return false
+    }
+
+    return delete_by_kv_entry(store, val)
+}
+
+delete_by_kv_entry :: proc (store: ^KVStore, kv_entry: KVEntry) -> bool{
     file := get_file(store)
     defer os.close(file)
     data, read_err := os.read_entire_file(file, context.allocator)
