@@ -17,7 +17,9 @@ KVStore :: struct {
 }
 
 KEY_VAL_DELIMITER : string : ":"
+KEY_VAL_DELIMITER_PERCENT_ENCODED : string : "%3A"
 ENTRY_DELIMITER : string : ";"
+ENTRY_DELIMITER_PERCENT_ENCODED : string : "%3B"
 
 get_file :: proc(store: ^KVStore) -> ^os.File {
     file, err := os.open(store.filepath, flags = os.O_RDWR | os.O_CREATE, perm = os.Permissions_Read_Write_All)
@@ -80,6 +82,7 @@ build_index :: proc(store: ^KVStore) -> bool{
 
     for line in lines{
         entry, err := strings.split_n(line, ":", 2)
+        
         if err != runtime.Allocator_Error.None{
             fmt.println("Something went wrong parsing KV store file. Error: ", err)
             return false
@@ -89,8 +92,15 @@ build_index :: proc(store: ^KVStore) -> bool{
             delete(entry, context.allocator)
             continue
         }
-        key := strings.clone(entry[0])
-        value := strings.clone(entry[1])
+
+
+        percent_decoded_key, was_alloc_key := percent_decode(entry[0])
+        defer if was_alloc_key { delete(percent_decoded_key) }
+        percent_decoded_val, was_alloc_val := percent_decode(entry[1])
+        defer if was_alloc_val { delete(percent_decoded_val) }
+
+        key := strings.clone(percent_decoded_key)
+        value := strings.clone(percent_decoded_val)
 
         store.data[key] = value
 
@@ -102,16 +112,27 @@ build_index :: proc(store: ^KVStore) -> bool{
 
 }
 
+percent_encode :: proc(input: string) -> (string, bool) {
+    encoded, was_alloc := strings.replace_all(input, KEY_VAL_DELIMITER, KEY_VAL_DELIMITER_PERCENT_ENCODED)
+    defer if was_alloc { delete(encoded) }
+    encoded_2, was_alloc2 := strings.replace_all(encoded, ENTRY_DELIMITER, ENTRY_DELIMITER_PERCENT_ENCODED)
+    defer if was_alloc2 { delete(encoded_2) }
+    return strings.clone(encoded_2), true
+}
+
+percent_decode :: proc(input: string) -> (string, bool) {
+    decoded, was_alloc := strings.replace_all(input, KEY_VAL_DELIMITER_PERCENT_ENCODED, KEY_VAL_DELIMITER)
+    defer if was_alloc { delete(decoded) }
+    decoded2, was_alloc2 := strings.replace_all(decoded, ENTRY_DELIMITER_PERCENT_ENCODED, ENTRY_DELIMITER)
+    defer if was_alloc2 { delete(decoded2) }
+    return strings.clone(decoded2), true
+}
+
 // key_exists looks up if key exists in database.
 key_exists :: proc(store: ^KVStore, key: string) -> bool {
     _, ok := store.data[key]
     return ok
 }
-
-// get_entry looks up a key in the database file.
-//
-// If the key is found, it returns a value string 
-// cloned from the file buffer. 
 
 // Returns:
 // - value: The matching value string. Borrowed, do not free. 
@@ -119,6 +140,11 @@ key_exists :: proc(store: ^KVStore, key: string) -> bool {
 get_entry :: proc(store: ^KVStore , key: string) -> (string, bool) {
     return store.data[key]
 }
+
+// read looks up a key in the database file.
+//
+// If the key is found, it returns a value string 
+// cloned from the file buffer. 
 
 // Returns:
 // - value: The matching value string. **The caller is responsible for freeing this 
@@ -134,9 +160,8 @@ read :: proc (store: ^KVStore, key: string) -> (string, bool) {
 
 // write inserts a key-value pair into the store.
 //
-// Note: This procedure TAKES OWNERSHIP of the `key` and `value` strings. 
-// Do not modify or free them after passing them in. The store will handle 
-// their deallocation inside `dealloc`.
+// The key and value are copied into the store.
+// The caller retains ownership of the original strings.
 write :: proc (store: ^KVStore, key: string, value: string) -> bool {
 
     found := key_exists(store, key)
@@ -161,10 +186,15 @@ sync :: proc (store: ^KVStore) -> bool {
     defer strings.builder_destroy(&new_lines)
 
     for key, val in store.data {
-        strings.write_string(&new_lines, key)
+        encoded_key, was_alloc_key := percent_encode(key)
+        encoded_val, was_alloc_val := percent_encode(val)
+
+        strings.write_string(&new_lines, encoded_key)
         strings.write_string(&new_lines, KEY_VAL_DELIMITER)
-        strings.write_string(&new_lines, val)
+        strings.write_string(&new_lines, encoded_val)
         strings.write_string(&new_lines, ENTRY_DELIMITER)
+        if was_alloc_key {  delete(encoded_key) }
+        if was_alloc_val {  delete(encoded_val) }
     }
 
     _, seek_err := os.seek(file, 0, .Start)
@@ -187,15 +217,23 @@ sync :: proc (store: ^KVStore) -> bool {
 
 }
 // remove removes a key-value pair from the store.
-// NOTE: this proc does not free data map values on remove. This is considered a bug but will be fixed 
-// when we move to a zero-copy implementation where the values are slices into the file data. 
+// NOTE: slow, when we move to a zero-copy implementation where the values 
+// are slices into the file data this will be much faster. 
 remove :: proc (store: ^KVStore, key: string) -> bool{
-    val, found := read(store, key)
+    val, found := get_entry(store, key)
+
     if !found {
         fmt.println("Value for Key", key, "not found")    
         return false
     }
-    delete(val)
-    delete_key(&store.data, key)
+    for k, v in store.data {
+        if k == key {
+            delete(k)
+            delete(v)
+            delete_key(&store.data, k)
+            break
+        }
+    }
+    
     return true
 }
