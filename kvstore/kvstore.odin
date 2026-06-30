@@ -26,7 +26,7 @@ get_file :: proc(store: ^KVStore) -> ^os.File {
     return file
 }
 
-make_store :: proc(filepath: string, allocator := context.allocator) -> (^KVStore, bool) {
+make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (^KVStore, bool) {
     // 1. Allocate the KVStore on the heap so its pointer stays stable
     store, err := new(KVStore, allocator)
     if err != nil do return nil, false
