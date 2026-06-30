@@ -269,32 +269,6 @@ send :: proc (sock: net.TCP_Socket, message: string){
 	}
 }
 
-handle_msg_echo :: proc(server: ^KVServer, sock: net.TCP_Socket) {
-	buffer: [256]u8
-	for {
-		bytes_recv, err_recv := net.recv_tcp(sock, buffer[:])
-		if err_recv != nil {
-			fmt.println("Failed to receive data")
-		}
-		received := buffer[:bytes_recv]
-		if len(received) == 0 ||
-		   is_ctrl_d(received) ||
-		   is_empty(received) ||
-		   is_telnet_ctrl_c(received) {
-			fmt.println("Disconnecting client")
-			break
-		}
-		fmt.printfln("Server received [ %d bytes ]: %s", len(received), received)
-		bytes_sent, err_send := net.send_tcp(sock, received)
-		if err_send != nil {
-			fmt.println("Failed to send data")
-		}
-		sent := received[:bytes_sent]
-		fmt.printfln("Server sent [ %d bytes ]: %s", len(sent), sent)
-	}
-	net.close(sock)
-}
-
 parse_args :: proc() -> (net.Endpoint, bool) {
     addr, addr_ok := net.parse_ip4_address(os.args[1]); 
     if !addr_ok{
