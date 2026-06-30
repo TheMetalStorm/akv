@@ -7,11 +7,12 @@ import "base:runtime"
 
 // TODO: zero copy version where map key and val are just slices into file data
 // TODO: commands should be able to deal with Delimiters in keys or values 
+// TODO: return error codes for all functions instead of just bools and do not print messages.
 
-// Datastored in file as "key1:value1;key2:value2"
+
+// Data stored in file as "key1:value1;key2:value2"
 KVStore :: struct {
     filepath: string,
-    // TODO: dealloc indices and strings 
     data: map[string]string
 }
 
@@ -186,7 +187,8 @@ sync :: proc (store: ^KVStore) -> bool {
 
 }
 // remove removes a key-value pair from the store.
-// Warning: This procedure does not free the memory for the key and value strings.
+// NOTE: this proc does not free data map values on remove. This is considered a bug but will be fixed 
+// when we move to a zero-copy implementation where the values are slices into the file data. 
 remove :: proc (store: ^KVStore, key: string) -> bool{
     val, found := read(store, key)
     if !found {
