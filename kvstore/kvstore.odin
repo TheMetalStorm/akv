@@ -3,6 +3,7 @@ package kvstore
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:net"
 import "base:runtime"
 
 // TODO: zero copy version where map key and val are just slices into file data
@@ -93,10 +94,20 @@ build_index :: proc(store: ^KVStore) -> bool{
         }
 
 
-        percent_decoded_key, was_alloc_key := percent_decode(entry[0])
-        defer if was_alloc_key { delete(percent_decoded_key) }
-        percent_decoded_val, was_alloc_val := percent_decode(entry[1])
-        defer if was_alloc_val { delete(percent_decoded_val) }
+        percent_decoded_key, ok := percent_decode(entry[0])
+        if !ok {
+            fmt.println("Something went wrong percent decoding key in KV store file. Key: ", entry[0])
+            delete(entry, context.allocator)
+            return false
+        }
+        defer delete(percent_decoded_key) 
+        percent_decoded_val, ok2 := percent_decode(entry[1])
+        if !ok2 {
+            fmt.println("Something went wrong percent decoding value in KV store file. Value: ", entry[1])
+            delete(entry, context.allocator)
+            return false
+        }
+        defer delete(percent_decoded_val) 
 
         key := strings.clone(percent_decoded_key)
         value := strings.clone(percent_decoded_val)
@@ -111,20 +122,13 @@ build_index :: proc(store: ^KVStore) -> bool{
 
 }
 
-percent_encode :: proc(input: string) -> (string, bool) {
-    encoded, was_alloc := strings.replace_all(input, KEY_VAL_DELIMITER, KEY_VAL_DELIMITER_PERCENT_ENCODED)
-    defer if was_alloc { delete(encoded) }
-    encoded_2, was_alloc2 := strings.replace_all(encoded, ENTRY_DELIMITER, ENTRY_DELIMITER_PERCENT_ENCODED)
-    defer if was_alloc2 { delete(encoded_2) }
-    return strings.clone(encoded_2), true
+percent_encode :: proc(input: string) -> string {
+    return net.percent_encode(input)
+
 }
 
 percent_decode :: proc(input: string) -> (string, bool) {
-    decoded, was_alloc := strings.replace_all(input, KEY_VAL_DELIMITER_PERCENT_ENCODED, KEY_VAL_DELIMITER)
-    defer if was_alloc { delete(decoded) }
-    decoded2, was_alloc2 := strings.replace_all(decoded, ENTRY_DELIMITER_PERCENT_ENCODED, ENTRY_DELIMITER)
-    defer if was_alloc2 { delete(decoded2) }
-    return strings.clone(decoded2), true
+    return net.percent_decode(input)
 }
 
 // key_exists looks up if key exists in database.
@@ -185,15 +189,15 @@ sync :: proc (store: ^KVStore) -> bool {
     defer strings.builder_destroy(&new_lines)
 
     for key, val in store.data {
-        encoded_key, was_alloc_key := percent_encode(key)
-        encoded_val, was_alloc_val := percent_encode(val)
+        encoded_key := percent_encode(key)
+        encoded_val := percent_encode(val)
 
         strings.write_string(&new_lines, encoded_key)
         strings.write_string(&new_lines, KEY_VAL_DELIMITER)
         strings.write_string(&new_lines, encoded_val)
         strings.write_string(&new_lines, ENTRY_DELIMITER)
-        if was_alloc_key {  delete(encoded_key) }
-        if was_alloc_val {  delete(encoded_val) }
+        delete(encoded_key) 
+        delete(encoded_val) 
     }
 
     _, seek_err := os.seek(file, 0, .Start)
