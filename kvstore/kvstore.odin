@@ -5,9 +5,10 @@ import "core:os"
 import "core:strings"
 import "base:runtime"
 
-// stored in file as "key1:value1;key2:value2"
 // TODO: zero copy version where map key and val are just slices into file data
-// TODO: deal with delimiters in data!!
+// TODO: commands should be able to deal with Delimiters in keys or values 
+
+// Datastored in file as "key1:value1;key2:value2"
 KVStore :: struct {
     filepath: string,
     // TODO: dealloc indices and strings 
@@ -27,19 +28,15 @@ get_file :: proc(store: ^KVStore) -> ^os.File {
 }
 
 make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (^KVStore, bool) {
-    // 1. Allocate the KVStore on the heap so its pointer stays stable
     store, err := new(KVStore, allocator)
     if err != nil do return nil, false
 
-    // 2. Clone the filepath using the same allocator
     store.filepath = strings.clone(filepath, allocator)
-    store.data = {} // or whatever your initialization is
+    store.data = {} 
 
-    // 3. Pass the stable heap pointer to build_index
     ok := build_index(store)
     if !ok {
         fmt.println("Could not build index for store at", store.filepath)
-        // Clean up on failure to prevent leaks
         delete(store.filepath, allocator)
         free(store, allocator)
         return nil, false
@@ -105,7 +102,6 @@ build_index :: proc(store: ^KVStore) -> bool{
 }
 
 // key_exists looks up if key exists in database.
-
 key_exists :: proc(store: ^KVStore, key: string) -> bool {
     _, ok := store.data[key]
     return ok
@@ -189,10 +185,9 @@ sync :: proc (store: ^KVStore) -> bool {
     return true
 
 }
-// del removes a key-value pair from the store.
+// remove removes a key-value pair from the store.
 // Warning: This procedure does not free the memory for the key and value strings.
-
-del :: proc (store: ^KVStore, key: string) -> bool{
+remove :: proc (store: ^KVStore, key: string) -> bool{
     val, found := read(store, key)
     if !found {
         fmt.println("Value for Key", key, "not found")    
@@ -201,5 +196,4 @@ del :: proc (store: ^KVStore, key: string) -> bool{
     delete(val)
     delete_key(&store.data, key)
     return true
-
 }

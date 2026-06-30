@@ -131,6 +131,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			send(sock, FALSE_COMMAND_MESSAGE)
 		}
 		
+		//TODO: commands should be able to deal with keys or values that have spaces in them
 		switch command_split[0]{
 			case "DEL":
 
@@ -149,7 +150,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if len(del_key) == 1 {
 					trimmed  := strings.trim_space(del_key[0])
 		
-					ok := kvstore.del(server.store, trimmed)
+					ok := kvstore.remove(server.store, trimmed)
 
 					if ok {
 						sync_ok := kvstore.sync(server.store)

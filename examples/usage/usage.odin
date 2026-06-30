@@ -45,7 +45,7 @@ main :: proc (){
     }
 
 
-    del_ok := kvstore.del(store, "hello")
+    del_ok := kvstore.remove(store, "hello")
     if del_ok {
         fmt.println("Deleted entry successfully")
     }
