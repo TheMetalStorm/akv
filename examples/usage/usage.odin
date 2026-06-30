@@ -31,23 +31,26 @@ main :: proc (){
     // KV Store name can be specified as an argument, otherwise defaults to "./store.db"
     store, ok := kvstore.make_store()
 
+    key := ":hello:"
+    value := ";world;"
+
     // Write an entry to the store
-    write_ok := kvstore.write(store, ":hello:", ";world;")
+    write_ok := kvstore.write(store, key, value)
     if !write_ok {
         fmt.println("Failed to write to KV store")
     }
     else {
-        fmt.println("Successfully wrote key ':hello:' with value ';world;' to KV store")
+        fmt.println("Successfully wrote key '", key, "' with value '", value, "' to KV store")
     }
 
     // Read the entry back from the store
-    entry, entry_ok := kvstore.get_entry(store, ":hello:")
+    entry, entry_ok := kvstore.get_entry(store, key)
     if entry_ok {
-        fmt.println("Retrieved entry:", entry)
+        fmt.println("Retrieved entry for key '", key, "': ", entry)
     }
 
     // Remove the entry from the store
-    del_ok := kvstore.remove(store, ":hello:")
+    del_ok := kvstore.remove(store, key)
     if del_ok {
         fmt.println("Deleted entry successfully")
     }
@@ -55,7 +58,7 @@ main :: proc (){
     // Sync the store to disk 
     kvstore.sync(store)
 
-    // Deallocate the store and free memory (currently doesn not free values strings)
+    // Deallocate the store and free memory 
     kvstore.deallocate(store)
 
 
