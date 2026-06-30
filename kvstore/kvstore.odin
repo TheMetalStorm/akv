@@ -7,6 +7,7 @@ import "base:runtime"
 
 // stored in file as "key1:value1;key2:value2"
 // TODO: zero copy version where map key and val are just slices into file data
+// TODO: deal with delimiters in data!!
 KVStore :: struct {
     filepath: string,
     // TODO: dealloc indices and strings 
@@ -25,20 +26,29 @@ get_file :: proc(store: ^KVStore) -> ^os.File {
     return file
 }
 
-init :: proc(filepath: string) -> (KVStore, bool) {
-    
-    store: KVStore = KVStore{strings.clone(filepath), {}}
+make_store :: proc(filepath: string, allocator := context.allocator) -> (^KVStore, bool) {
+    // 1. Allocate the KVStore on the heap so its pointer stays stable
+    store, err := new(KVStore, allocator)
+    if err != nil do return nil, false
 
-    ok := build_index(&store)
+    // 2. Clone the filepath using the same allocator
+    store.filepath = strings.clone(filepath, allocator)
+    store.data = {} // or whatever your initialization is
+
+    // 3. Pass the stable heap pointer to build_index
+    ok := build_index(store)
     if !ok {
         fmt.println("Could not build index for store at", store.filepath)
-        return {}, false
+        // Clean up on failure to prevent leaks
+        delete(store.filepath, allocator)
+        free(store, allocator)
+        return nil, false
     }
 
     return store, true
 }
 
-dealloc :: proc(store: ^KVStore){
+deallocate :: proc(store: ^KVStore){
 
     delete(store.filepath)
     for key, val in store.data{
@@ -46,6 +56,7 @@ dealloc :: proc(store: ^KVStore){
         delete(val)
     }
     delete(store.data)
+    free(store, context.allocator)
     
 }
 
