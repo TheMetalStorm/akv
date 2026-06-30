@@ -6,7 +6,6 @@ import "core:strings"
 import "base:runtime"
 
 // TODO: zero copy version where map key and val are just slices into file data
-// TODO: commands should be able to deal with Delimiters in keys or values 
 // TODO: return error codes for all functions instead of just bools and do not print messages.
 
 
