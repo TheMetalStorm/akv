@@ -131,17 +131,11 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			fmt.println("Error:", err)
 			send(sock, INVALID_COMMAND_MESSAGE)
 		}
-		
-
-		//TODO: commands should be able to deal with keys or values that have spaces in them
-		// DEL "key with spaces" "value with spaces"
 
 		switch command_split[0]{
 			case "DEL":
 
 				fmt.printfln("Server received DEL command: %s", command)
-
-
 				
 				trimmed  := strings.trim_space(command_split[1])
 				len := len(trimmed)
@@ -207,7 +201,8 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					send(sock, KEY_NOT_FOUND_MESSAGE)
 				}
 
-
+			// TODO: put should be able to deal with keys or values that have spaces in them
+			// put "key with spaces" "value with spaces"
 			case "PUT":
 				fmt.printfln("Server received PUT command: %s", command)
 
@@ -248,16 +243,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					fmt.println("Command is invalid")
 					send(sock, INVALID_COMMAND_MESSAGE)
 				}
-			// case "SYNC":
-			// 	fmt.printfln("Server received SYNC command: %s", command)
-			// 	sync_ok := kvstore.sync(server.store)
-			// 	if sync_ok {
-			// 		fmt.print(SYNC_SUCCESS_MESSAGE)
-			// 		send(sock, SYNC_SUCCESS_MESSAGE)
-			// 	} else {
-			// 		fmt.println("Failed to sync store!")
-			// 		send(sock, "Failed to sync store!\n")
-			// 	}
 			case :
 				fmt.println("Command is invalid")
 				send(sock, INVALID_COMMAND_MESSAGE)
