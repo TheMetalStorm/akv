@@ -31,8 +31,8 @@ main :: proc (){
     // KV Store name can be specified as an argument, otherwise defaults to "./store.db"
     store, ok := kvstore.make_store()
 
-    key := ":hello:"
-    value := ";world;"
+    key := ":hello :\""
+    value := ";world; "
 
     // Write an entry to the store
     write_ok := kvstore.write(store, key, value)
