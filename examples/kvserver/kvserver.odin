@@ -15,15 +15,16 @@ KVServer :: struct{
 	endpoint: net.Endpoint
 }
 
-FALSE_COMMAND_MESSAGE : string : "The command is invalid!\n"
+INVALID_COMMAND_MESSAGE : string : "The command is invalid!\n"
 KEY_NOT_FOUND_MESSAGE : string : "Key not found in store!\n"
+KEY_NOT_QUOTED : string : "The key has to be sorrounded by \"!\n"
 
 SYNC_SUCCESS_MESSAGE : string : "Synced Store sucessfully!"
 
 DEL_SUCCESS_MESSAGE : string : "Deleted Key sucessfully!\n"
-DEL_TOO_MANY_MESSAGE : string : "Submit Delete command in the form of DEL key\n"
+DEL_TOO_MANY_MESSAGE : string : "Submit Delete command in the form of DEL \"key\"\n"
 
-GET_TOO_MANY_MESSAGE : string : "Submit Get command in the form of GET key\n"
+GET_TOO_MANY_MESSAGE : string : "Submit Get command in the form of GET \"key\"\n"
 
 main :: proc() {
     track: mem.Tracking_Allocator
@@ -128,81 +129,84 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			//TODO: print help and better error
 			fmt.println("Command is invalid")
 			fmt.println("Error:", err)
-			send(sock, FALSE_COMMAND_MESSAGE)
+			send(sock, INVALID_COMMAND_MESSAGE)
 		}
 		
+
 		//TODO: commands should be able to deal with keys or values that have spaces in them
+		// DEL "key with spaces" "value with spaces"
+
 		switch command_split[0]{
 			case "DEL":
 
 				fmt.printfln("Server received DEL command: %s", command)
 
-				del_key, err := strings.split(command_split[1], " ")
-				defer delete(del_key)
 
-				if err != runtime.Allocator_Error.None {
-					fmt.println("Command is invalid")
-					fmt.println("Error:", err)
-					send(sock, FALSE_COMMAND_MESSAGE)
+				
+				trimmed  := strings.trim_space(command_split[1])
+				len := len(trimmed)
+					
+				if len < 2 {
+					fmt.println(KEY_NOT_QUOTED, trimmed)
+					send(sock, KEY_NOT_QUOTED)
 					continue
 				}
-				
-				if len(del_key) == 1 {
-					trimmed  := strings.trim_space(del_key[0])
-		
-					ok := kvstore.remove(server.store, trimmed)
 
-					if ok {
-						sync_ok := kvstore.sync(server.store)
+				if trimmed[0] != '\"' || trimmed[len-1] != '\"' {
+					fmt.println(KEY_NOT_QUOTED, trimmed)
+					send(sock, KEY_NOT_QUOTED)
+					continue
+				}
 
-						if !sync_ok {
-							fmt.println("Failed to sync store after deleting key:", trimmed)
-							send(sock, "Failed to sync store!\n")
-						}
-						fmt.println("Deleted key:", trimmed)
-						send(sock, DEL_SUCCESS_MESSAGE)
-					} else {
-						fmt.println("Key not found:", trimmed)
-						send(sock, KEY_NOT_FOUND_MESSAGE)
+				unquoted := trimmed[1:len-1]
+
+				ok := kvstore.remove(server.store, unquoted)
+
+				if ok {
+					sync_ok := kvstore.sync(server.store)
+
+					if !sync_ok {
+						fmt.println("Failed to sync store after deleting key:", unquoted)
+						send(sock, "Failed to sync store!\n")
 					}
+					fmt.println("Deleted key:", unquoted)
+					send(sock, DEL_SUCCESS_MESSAGE)
+				} else {
+					fmt.println(server.store.data)
+					fmt.println("Key not found:", unquoted)
+					send(sock, KEY_NOT_FOUND_MESSAGE)
 				}
-				else {
-					fmt.println("Command is invalid")
-					send(sock, FALSE_COMMAND_MESSAGE)
-					send(sock, DEL_TOO_MANY_MESSAGE)
-				}
-
 			case "GET":
 				fmt.printfln("Server received GET command: %s", command)
 
-				get_key, err := strings.split_n(command_split[1], " ", 2)
-				defer delete(get_key)
 
-				if err != runtime.Allocator_Error.None {
-					fmt.println("Command is invalid")
-					fmt.println("Error:", err)
-					send(sock, FALSE_COMMAND_MESSAGE)
+				trimmed  := strings.trim_space(command_split[1])
+				len := len(trimmed)
+					
+				if len < 2 {
+					fmt.println(KEY_NOT_QUOTED, trimmed)
+					send(sock, KEY_NOT_QUOTED)
 					continue
 				}
-				
-				if len(get_key) == 1 {
-					trimmed  := strings.trim_space(get_key[0])
 
-					value, ok := kvstore.get_entry(server.store, trimmed)
-					if ok {
-						fmt.println("Retrieved value for key:", trimmed, "value:", value)
-						send(sock, value)
-						send(sock, "\n")
-					} else {
-						fmt.println("Key not found:", trimmed)
-						send(sock, KEY_NOT_FOUND_MESSAGE)
-					}
+				if trimmed[0] != '\"' || trimmed[len-1] != '\"' {
+					fmt.println(KEY_NOT_QUOTED, trimmed)
+					send(sock, KEY_NOT_QUOTED)
+					continue
 				}
-				else {
-					fmt.println("Command is invalid")
-					send(sock, FALSE_COMMAND_MESSAGE)
-					send(sock, GET_TOO_MANY_MESSAGE)
+
+				unquoted := trimmed[1:len-1]
+
+				value, ok := kvstore.get_entry(server.store, unquoted)
+				if ok {
+					fmt.println("Retrieved value for key:", unquoted, "value:", value)
+					send(sock, value)
+					send(sock, "\n")
+				} else {
+					fmt.println("Key not found:", unquoted)
+					send(sock, KEY_NOT_FOUND_MESSAGE)
 				}
+
 
 			case "PUT":
 				fmt.printfln("Server received PUT command: %s", command)
@@ -213,7 +217,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if err != runtime.Allocator_Error.None {
 					fmt.println("Command is invalid")
 					fmt.println("Error:", err)
-					send(sock, FALSE_COMMAND_MESSAGE)
+					send(sock, INVALID_COMMAND_MESSAGE)
 					continue
 				}
 				if len(put_key_val) == 2 {
@@ -242,7 +246,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					}
 				} else {
 					fmt.println("Command is invalid")
-					send(sock, FALSE_COMMAND_MESSAGE)
+					send(sock, INVALID_COMMAND_MESSAGE)
 				}
 			// case "SYNC":
 			// 	fmt.printfln("Server received SYNC command: %s", command)
@@ -256,7 +260,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			// 	}
 			case :
 				fmt.println("Command is invalid")
-				send(sock, FALSE_COMMAND_MESSAGE)
+				send(sock, INVALID_COMMAND_MESSAGE)
 		}
 	}
 	net.close(sock)
