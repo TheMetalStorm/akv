@@ -15,15 +15,21 @@ KVServer :: struct{
 	endpoint: net.Endpoint
 }
 
-FALSE_COMMAND_MESSAGE : string : "The command is invalid!\n"
+FALSE_COMMAND_MESSAGE : string : "The command is invalid!\nPlease use the HELP command to see the list of valid commands\n"
 KEY_NOT_FOUND_MESSAGE : string : "Key not found in store!\n"
 
 SYNC_SUCCESS_MESSAGE : string : "Synced Store sucessfully!"
 
 DEL_SUCCESS_MESSAGE : string : "Deleted Key sucessfully!\n"
-DEL_TOO_MANY_MESSAGE : string : "Submit Delete command in the form of DEL key\n"
+DEL_TOO_MANY_MESSAGE : string : "DEL expects one argument. Refer to the HELP command for more information\n"
 
-GET_TOO_MANY_MESSAGE : string : "Submit Get command in the form of GET key\n"
+GET_TOO_MANY_MESSAGE : string : "GET expects one argument. Refer to the HELP command for more information\n"
+
+HELP_MESSAGE : string : "Commands:\n" +
+	"PUT key value - Store a key-value pair in the KV Store. Key is not allowed to contain spaces\n" +
+	"GET key - Retrieve the value associated with a key from the KV Store\n" +
+	"DEL key - Delete a key-value pair from the KV Store\n" +
+	"HELP - Display this help message\n"
 
 main :: proc() {
     track: mem.Tracking_Allocator
@@ -115,23 +121,42 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 
 		if len(received) == 0 ||
 		   is_ctrl_d(received) ||
-		   is_empty(received) ||
 		   is_telnet_ctrl_c(received) {
 			fmt.println("Disconnecting client")
 			break
 		}
 
 		command := string(received)
+
+		// //First we check for help message
+		help_command_split, err_help := strings.split(command, " ")
+		defer delete(help_command_split)
+		if err_help != runtime.Allocator_Error.None {
+			fmt.println("Command is invalid")
+			fmt.println("Error:", err_help)
+			send(sock, FALSE_COMMAND_MESSAGE)
+			continue
+		}
+		fmt.printfln("Server received command: %s", command)
+		fmt.printfln("Server received command split: %v", help_command_split)
+
+		t := strings.trim_space(help_command_split[0])
+
+		if len(help_command_split) == 1 && t == "HELP" {
+			fmt.printfln("Server received HELP command: %s", command)
+			send(sock, HELP_MESSAGE)
+			continue
+		}
+
 		command_split, err := strings.split_n(command, " ", 2)
 		defer delete(command_split)
 		if err != runtime.Allocator_Error.None {
-			//TODO: print help and better error
 			fmt.println("Command is invalid")
 			fmt.println("Error:", err)
 			send(sock, FALSE_COMMAND_MESSAGE)
+			continue
 		}
 		
-		//TODO: commands should be able to deal with keys or values that have spaces in them
 		switch command_split[0]{
 			case "DEL":
 
@@ -203,7 +228,8 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					send(sock, FALSE_COMMAND_MESSAGE)
 					send(sock, GET_TOO_MANY_MESSAGE)
 				}
-
+			
+			// NOTE: Key is not allowed to contain spaces. The library can handle keys with spaces, but the server does not support it at this time.
 			case "PUT":
 				fmt.printfln("Server received PUT command: %s", command)
 
@@ -244,16 +270,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					fmt.println("Command is invalid")
 					send(sock, FALSE_COMMAND_MESSAGE)
 				}
-			// case "SYNC":
-			// 	fmt.printfln("Server received SYNC command: %s", command)
-			// 	sync_ok := kvstore.sync(server.store)
-			// 	if sync_ok {
-			// 		fmt.print(SYNC_SUCCESS_MESSAGE)
-			// 		send(sock, SYNC_SUCCESS_MESSAGE)
-			// 	} else {
-			// 		fmt.println("Failed to sync store!")
-			// 		send(sock, "Failed to sync store!\n")
-			// 	}
 			case :
 				fmt.println("Command is invalid")
 				send(sock, FALSE_COMMAND_MESSAGE)
