@@ -6,7 +6,7 @@ import "core:strconv"
 import "core:strings"
 import "base:runtime"
 import "core:mem"
-
+import "core:thread"
 
 import "../../kvstore"
 
@@ -207,13 +207,14 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if len(get_key) == 1 {
 					trimmed  := strings.trim_space(get_key[0])
 
-					value, ok := kvstore.get_entry(server.store, trimmed)
-					if ok {
+					value, err := kvstore.read(server.store, trimmed)
+					defer delete(value, context.allocator)
+					if err == kvstore.Store_Error.None {
 						fmt.println("Retrieved value for key:", trimmed, "value:", value)
 						send(sock, value)
 						send(sock, "\n")
 					} else {
-						fmt.println("Key not found:", trimmed)
+						fmt.println("Key not found:", trimmed, "Error:", err)
 						send(sock, KEY_NOT_FOUND_MESSAGE)
 					}
 				}
@@ -312,9 +313,10 @@ start :: proc(server: ^KVServer){
 				fmt.println("Failed to accept TCP connection")
 				continue
 			}
-			handle_command(server, cli)
-			//TODO: multithreaded
-			//thread.create_and_start_with_poly_data(cli, handle_msg_echo)
+			// WITHOUT MULTITHREADING, THIS WILL BLOCK THE SERVER FROM ACCEPTING NEW CONNECTIONS UNTIL THE CLIENT DISCONNECTS
+			//handle_command(server, cli)
+			// WITH MULTITHREADING, THE SERVER CAN ACCEPT NEW CONNECTIONS WHILE HANDLING CLIENT COMMANDS
+			thread.create_and_start_with_poly_data2(server, cli, handle_command)
 	}
 	net.close(sock)
 	fmt.println("Closed socket")
