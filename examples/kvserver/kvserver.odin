@@ -70,9 +70,9 @@ deallocate :: proc(server: ^KVServer)  {
 
 init_server :: proc() -> (KVServer, bool) {
 
-	store, ok := kvstore.make_store()
-	if !ok{
-		fmt.println("Could not create KV Store, shutting down")
+	store, store_err := kvstore.make_store()
+	if store_err != kvstore.Store_Error.None {
+		fmt.println("Could not create KV Store, shutting down. Error:", store_err)
 		return {}, false
 	}
 
@@ -175,12 +175,12 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if len(del_key) == 1 {
 					trimmed  := strings.trim_space(del_key[0])
 		
-					ok := kvstore.remove(server.store, trimmed)
+					remove_err := kvstore.remove(server.store, trimmed)
 
-					if ok {
-						sync_ok := kvstore.sync(server.store)
+					if remove_err == kvstore.Store_Error.None {
+						sync_err := kvstore.sync(server.store)
 
-						if !sync_ok {
+						if sync_err != kvstore.Store_Error.None {
 							fmt.println("Failed to sync store after deleting key:", trimmed)
 							send(sock, "Failed to sync store!\n")
 						}
@@ -252,14 +252,14 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 						continue
 					}
 
-					write_ok := kvstore.write(server.store, trimmed_key, trimmed_val)
-					if !write_ok {
+					write_err := kvstore.write(server.store, trimmed_key, trimmed_val)
+					if write_err != kvstore.Store_Error.None {
 						fmt.println("Failed to write key-value pair:", trimmed_key, trimmed_val)
 						send(sock, "Failed to write key-value pair!\n")
 					}
 					else {
-						sync_ok := kvstore.sync(server.store)
-						if !sync_ok {
+						sync_err := kvstore.sync(server.store)
+						if sync_err != kvstore.Store_Error.None {
 							fmt.println("Failed to sync store after writing key-value pair:", trimmed_key, trimmed_val)
 							send(sock, "Failed to sync store!\n")
 						}
