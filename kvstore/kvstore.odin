@@ -5,8 +5,6 @@ import "core:strings"
 import "core:net"
 import "base:runtime"
 
-// TODO: return error codes for all functions instead of just bools and do not print messages.
-
 // Data stored in file as "key1:value1;key2:value2"
 KVStore :: struct {
     filepath: string,
