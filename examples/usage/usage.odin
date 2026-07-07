@@ -49,9 +49,14 @@ main :: proc (){
     }
 
     // Read the entry back from the store
-    entry, entry_ok := kvstore.get_entry(store, key)
-    if entry_ok {
-        fmt.println("Retrieved entry for key '", key, "': ", entry)
+    read, read_ok := kvstore.read(store, key)
+    defer delete(read, context.allocator)
+    if read_ok == kvstore.Store_Error.None {
+        fmt.println("Retrieved entry for key '", key, "': ", read)
+    }
+    else {
+        fmt.println("Failed to read entry for key '", key, "'")
+        return
     }
 
     // Remove the entry from the store
