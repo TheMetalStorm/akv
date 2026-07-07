@@ -6,7 +6,6 @@ import "core:strings"
 import "core:net"
 import "base:runtime"
 
-// TODO: zero copy version where map key and val are just slices into file data
 // TODO: return error codes for all functions instead of just bools and do not print messages.
 
 
@@ -220,8 +219,6 @@ sync :: proc (store: ^KVStore) -> bool {
 
 }
 // remove removes a key-value pair from the store.
-// NOTE: slow, when we move to a zero-copy implementation where the values 
-// are slices into the file data this will be much faster. 
 remove :: proc (store: ^KVStore, key: string) -> bool{
     val, found := get_entry(store, key)
 
@@ -229,14 +226,10 @@ remove :: proc (store: ^KVStore, key: string) -> bool{
         fmt.println("Value for Key", key, "not found")    
         return false
     }
-    for k, v in store.data {
-        if k == key {
-            delete(k)
-            delete(v)
-            delete_key(&store.data, k)
-            break
-        }
-    }
+    
+    kk, vk := delete_key(&store.data, key)
+    delete(kk)
+    delete(vk)
     
     return true
 }
