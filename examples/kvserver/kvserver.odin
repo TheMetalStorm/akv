@@ -138,7 +138,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			continue
 		}
 		fmt.printfln("Server received command: %s", command)
-		fmt.printfln("Server received command split: %v", help_command_split)
 
 		t := strings.trim_space(help_command_split[0])
 
@@ -159,9 +158,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 		
 		switch command_split[0]{
 			case "DEL":
-
-				fmt.printfln("Server received DEL command: %s", command)
-
 				del_key, err := strings.split(command_split[1], " ")
 				defer delete(del_key)
 
@@ -198,8 +194,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				}
 
 			case "GET":
-				fmt.printfln("Server received GET command: %s", command)
-
 				get_key, err := strings.split_n(command_split[1], " ", 2)
 				defer delete(get_key)
 
@@ -231,8 +225,6 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 			
 			// NOTE: Key is not allowed to contain spaces. The library can handle keys with spaces, but the server does not support it at this time.
 			case "PUT":
-				fmt.printfln("Server received PUT command: %s", command)
-
 				put_key_val, err := strings.split_n(command_split[1], " ", 2)
 				defer delete(put_key_val)
 
