@@ -37,6 +37,8 @@ Store_Error :: enum {
 // - error: If an error occurred during file opening
 @(private="file")
 get_file :: proc(store: ^KVStore) -> (^os.File, Store_Error) {
+    // TODO: maybe hardlock the file with flock (UNIX) or LockFileEx (Windows) to prevent multiple processes from writing to the file at the same time. 
+    // This would require a cross-platform implementation of file locking.
     file, err := os.open(store.filepath, flags = os.O_RDWR | os.O_CREATE, perm = os.Permissions_Read_Write_All)
     if err != os.ERROR_NONE {
         return nil, Store_Error.File_Error
@@ -221,11 +223,14 @@ remove :: proc (store: ^KVStore, key: string) -> Store_Error{
     return Store_Error.None
 }
 
+
 // Write the updated data in the Store to file
 
 // Returns:
 // - error: If an error occurred during syncing the store to file, otherwise returns Store_Error.None
 sync :: proc (store: ^KVStore) -> Store_Error {
+    // TODO: If computer loses power during sync, the file may be corrupted. Consider writing to a temporary file and then renaming it to the original file to ensure atomicity.
+    // or backing up the original file before writing to it, and restoring it if the write fails.
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
     file, err := get_file(store)
