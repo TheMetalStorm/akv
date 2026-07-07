@@ -4,10 +4,12 @@ import "core:os"
 import "core:strings"
 import "core:net"
 import "base:runtime"
+import "core:sync"
 
-// Data stored in file as "key1:value1;key2:value2"
+// NOTE: Data stored in file on disk as "key1:value1;key2:value2". Keys and values are percent-encoded to handle special characters. 
 KVStore :: struct {
     filepath: string,
+    mutex: sync.Mutex,
     data: map[string]string
 }
 
@@ -24,11 +26,16 @@ Store_Error :: enum {
 }
 
 
-KEY_VAL_DELIMITER : string : ":"
-KEY_VAL_DELIMITER_PERCENT_ENCODED : string : "%3A"
-ENTRY_DELIMITER : string : ";"
-ENTRY_DELIMITER_PERCENT_ENCODED : string : "%3B"
+@(private="file") KEY_VAL_DELIMITER : string : ":"
+@(private="file") ENTRY_DELIMITER : string : ";"
 
+@(private="file") KEY_VAL_DELIMITER_PERCENT_ENCODED : string : "%3A"
+@(private="file") ENTRY_DELIMITER_PERCENT_ENCODED : string : "%3B"
+
+// Returns:
+// - store: Pointer to the opened File or nil if an error occurred
+// - error: If an error occurred during file opening
+@(private="file")
 get_file :: proc(store: ^KVStore) -> (^os.File, Store_Error) {
     file, err := os.open(store.filepath, flags = os.O_RDWR | os.O_CREATE, perm = os.Permissions_Read_Write_All)
     if err != os.ERROR_NONE {
@@ -37,34 +44,11 @@ get_file :: proc(store: ^KVStore) -> (^os.File, Store_Error) {
     return file, Store_Error.None
 }
 
-make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (^KVStore, Store_Error) {
-    store, err := new(KVStore, allocator)
-    if err != nil do return nil, Store_Error.Could_Not_Create_Store_Error
 
-    store.filepath = strings.clone(filepath, allocator)
-    store.data = {} 
-
-    store_err := build_index(store)
-    if store_err != Store_Error.None {
-        deallocate(store)
-        return nil, store_err
-    }
-
-    return store, Store_Error.None
-}
-
-deallocate :: proc(store: ^KVStore){
-
-    delete(store.filepath)
-    for key, val in store.data{
-        delete(key)
-        delete(val)
-    }
-    delete(store.data)
-    free(store, context.allocator)
-    
-}
-
+// build_index reads the data from the file and builds the in-memory index of key-value pairs.
+// Returns:
+// - error: If an error occurred during indexing, otherwise returns Store_Error.None
+@(private="file")
 build_index :: proc(store: ^KVStore) -> Store_Error {
 
     file, err := get_file(store)
@@ -127,26 +111,52 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 
 }
 
-percent_encode :: proc(input: string) -> string {
-    return net.percent_encode(input)
+// make_store creates a new KVStore instance and initializes it with the data from the file at the specified filepath.
 
+// Returns:
+// - store: Pointer to the created KVStore instance or nil if an error occurred
+// - error: If an error occurred during store creation or initialization
+
+// Call this once on main thread to create the store. Do not call this on multiple threads.
+make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (^KVStore, Store_Error) {
+    store, err := new(KVStore, allocator)
+    if err != nil do return nil, Store_Error.Could_Not_Create_Store_Error
+
+    store.filepath = strings.clone(filepath, allocator)
+    store.data = {} 
+
+    store_err := build_index(store)
+    if store_err != Store_Error.None {
+        deallocate(store)
+        return nil, store_err
+    }
+
+    return store, Store_Error.None
 }
 
-percent_decode :: proc(input: string) -> (string, bool) {
-    return net.percent_decode(input)
+// deallocate frees the memory used by the KVStore instance and its associated data.
+deallocate :: proc(store: ^KVStore){
+
+    delete(store.filepath)
+    for key, val in store.data{
+        delete(key)
+        delete(val)
+    }
+    delete(store.data)
+    free(store, context.allocator)
+    
 }
 
 // key_exists looks up if key exists in database.
-key_exists :: proc(store: ^KVStore, key: string) -> bool {
-    _, ok := store.data[key]
-    return ok
-}
 
 // Returns:
-// - value: The matching value string. Borrowed, do not free. 
-// - found: If the key exists in the store
-get_entry :: proc(store: ^KVStore , key: string) -> (string, bool) {
-    return store.data[key]
+// - exists: true if the key exists in the store, false otherwise
+key_exists :: proc(store: ^KVStore, key: string) -> bool {
+    sync.mutex_lock(&store.mutex)
+    defer sync.mutex_unlock(&store.mutex)
+
+    _, ok := store.data[key]
+    return ok
 }
 
 // read looks up a key in the database file.
@@ -155,9 +165,12 @@ get_entry :: proc(store: ^KVStore , key: string) -> (string, bool) {
 // cloned from the file buffer. 
 
 // Returns:
-// - value: The matching value string. **The caller is responsible for freeing this 
-// - found: If the key exists in the store
+// - value: The matching copy of the value string. **The caller is responsible for freeing this 
+// - error: If an error occurred during reading a value from the store, otherwise returns Store_Error.None
 read :: proc (store: ^KVStore, key: string) -> (string, Store_Error) {
+    sync.mutex_lock(&store.mutex)
+    defer sync.mutex_unlock(&store.mutex)
+
     value, ok := store.data[key]
     if ok{
         return strings.clone(value), Store_Error.None
@@ -170,11 +183,14 @@ read :: proc (store: ^KVStore, key: string) -> (string, Store_Error) {
 //
 // The key and value are copied into the store.
 // The caller retains ownership of the original strings.
-write :: proc (store: ^KVStore, key: string, value: string) -> Store_Error {
 
-    found := key_exists(store, key)
-    
-    if found {
+// Returns:
+// - error: If an error occurred during writing to the store, otherwise returns Store_Error.None
+write :: proc (store: ^KVStore, key: string, value: string) -> Store_Error {
+    sync.mutex_lock(&store.mutex)
+    defer sync.mutex_unlock(&store.mutex)
+
+    if _, found := store.data[key]; found { 
         return Store_Error.Key_Already_Exists_Error
     }
 
@@ -183,9 +199,35 @@ write :: proc (store: ^KVStore, key: string, value: string) -> Store_Error {
 
 }
 
-// Write the updated data in the Store to file
-sync :: proc (store: ^KVStore) -> Store_Error {
 
+// remove removes a key-value pair from the store.
+
+// Returns:
+// - error: If an error occurred during removing the key-value pair, otherwise returns Store_Error.None
+remove :: proc (store: ^KVStore, key: string) -> Store_Error{
+    sync.mutex_lock(&store.mutex)
+    defer sync.mutex_unlock(&store.mutex)
+
+    value : string
+    found : bool
+    if value, found = store.data[key]; !found {
+        return Store_Error.Key_Not_Found_Error
+    }
+
+    kk, vk := delete_key(&store.data, key)
+    delete(kk)
+    delete(vk)
+    
+    return Store_Error.None
+}
+
+// Write the updated data in the Store to file
+
+// Returns:
+// - error: If an error occurred during syncing the store to file, otherwise returns Store_Error.None
+sync :: proc (store: ^KVStore) -> Store_Error {
+    sync.mutex_lock(&store.mutex)
+    defer sync.mutex_unlock(&store.mutex)
     file, err := get_file(store)
     if err != Store_Error.None {
         return err
@@ -223,17 +265,17 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     return Store_Error.None
 
 }
-// remove removes a key-value pair from the store.
-remove :: proc (store: ^KVStore, key: string) -> Store_Error{
-    val, found := get_entry(store, key)
 
-    if !found {
-        return Store_Error.Key_Not_Found_Error
-    }
-    
-    kk, vk := delete_key(&store.data, key)
-    delete(kk)
-    delete(vk)
-    
-    return Store_Error.None
+// Returns:
+// - encoded: The percent-encoded string
+percent_encode :: proc(input: string) -> string {
+    return net.percent_encode(input)
+
+}
+
+// Returns:
+// - decoded: The percent-decoded string
+// - ok: If the decoding was successful
+percent_decode :: proc(input: string) -> (string, bool) {
+    return net.percent_decode(input)
 }
