@@ -5,6 +5,7 @@ import "core:strings"
 import "core:net"
 import "base:runtime"
 import "core:sync"
+import "core:fmt"
 
 // NOTE: Data stored in file on disk as "key1:value1;key2:value2". Keys and values are percent-encoded to handle special characters. 
 KVStore :: struct {
@@ -22,7 +23,9 @@ Store_Error :: enum {
     Parsing_Error,
     Key_Not_Found_Error,
     Sync_Error,
-    Key_Already_Exists_Error
+    Key_Already_Exists_Error,
+    Could_Not_Create_Store_Backup_Error,
+    Could_Not_Restore_Original_File_Error
 }
 
 
@@ -229,16 +232,9 @@ remove :: proc (store: ^KVStore, key: string) -> Store_Error{
 // Returns:
 // - error: If an error occurred during syncing the store to file, otherwise returns Store_Error.None
 sync :: proc (store: ^KVStore) -> Store_Error {
-    // TODO: If computer loses power during sync, the file may be corrupted. Consider writing to a temporary file and then renaming it to the original file to ensure atomicity.
-    // or backing up the original file before writing to it, and restoring it if the write fails.
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
-    file, err := get_file(store)
-    if err != Store_Error.None {
-        return err
-    }
-    defer os.close(file)
-
+    
     new_lines := strings.builder_make_none()
     defer strings.builder_destroy(&new_lines)
 
@@ -254,19 +250,56 @@ sync :: proc (store: ^KVStore) -> Store_Error {
         delete(encoded_val) 
     }
 
-    _, seek_err := os.seek(file, 0, .Start)
-    if seek_err != os.ERROR_NONE{
-        return  Store_Error.Sync_Error
+    
+    temp_dir, mkdir_err := os.make_directory_temp(".", "kvstore_sync_temp_dir", context.allocator )
+    defer delete(temp_dir)
+    defer os.remove(temp_dir)
+
+    if mkdir_err != os.ERROR_NONE{
+        fmt.println("Failed to create temporary directory during sync")
+        return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
-    trunc_err := os.truncate(file, 0)
-    if trunc_err != os.ERROR_NONE{
-        return  Store_Error.Sync_Error
+    
+    temp, temp_err := os.create_temp_file(temp_dir, "kvstore_sync_temp")
+    if temp_err != os.ERROR_NONE{
+        os.close(temp)
+        fmt.println("Failed to create temporary file during sync")
+        return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
-    _, write_err := os.write_string(file, strings.to_string(new_lines))
+    
+    bak_path := fmt.aprint(store.filepath, ".bak", sep = "")
+    defer delete(bak_path)
+    
+    copy_err := os.copy_file( bak_path,store.filepath)
+
+    if copy_err != os.ERROR_NONE{
+        os.close(temp)
+        return  Store_Error.Could_Not_Create_Store_Backup_Error
+    }
+
+    _, write_err := os.write_string(temp, strings.to_string(new_lines))
     if write_err != os.ERROR_NONE{
+        os.close(temp)
+        fmt.println("Failed to write to temporary file during sync")
         return  Store_Error.Sync_Error
     }
 
+    flush_err := os.flush(temp)
+    if flush_err != os.ERROR_NONE {
+        os.close(temp)
+        return Store_Error.Sync_Error
+    }
+
+
+    temp_filepath := strings.clone(os.name(temp))
+    defer delete(temp_filepath)
+    os.close(temp)
+    rename_err := os.rename(temp_filepath, store.filepath)
+    if rename_err != os.ERROR_NONE{
+        return Store_Error.Sync_Error
+    }
+
+    os.remove(bak_path)
     return Store_Error.None
 
 }
