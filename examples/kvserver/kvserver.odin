@@ -1,3 +1,5 @@
+// adapted from https://github.com/odin-lang/examples/blob/master/net/tcp_echo_server/server/server.odin
+
 package kvserver
 import "core:fmt"
 import "core:net"
