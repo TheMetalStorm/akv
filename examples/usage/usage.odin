@@ -71,7 +71,7 @@ main :: proc (){
     // Sync the store to disk 
     sync_err := kvstore.sync(store)
     if sync_err != kvstore.Store_Error.None {
-        fmt.println("Failed to sync store")
+        fmt.println("Failed to sync store. Error: ", sync_err)
     }
 
     // Deallocate the store and free memory 
