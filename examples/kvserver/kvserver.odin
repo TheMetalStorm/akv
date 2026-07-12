@@ -58,11 +58,12 @@ main :: proc() {
     }
 
 	server, server_ok := init_server()
-	defer deallocate(&server)
 	if !server_ok{
 		fmt.println("Could not create KV Store, shutting down")
 		os.exit(1)
 	} 
+	defer deallocate(&server)
+
 	start(&server)
 }
 
