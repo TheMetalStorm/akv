@@ -10,7 +10,7 @@ import "core:sys/posix"
 
 // Currently only a Unix implementation is provided, but it should be easy to add a Windows implementation if needed.
 // NOTE: We use length-prefixed encoding to store the data in the format "len(data):data"
-// EXAMPLE: 5:hello6:world
+// EXAMPLE: 5:hello5:world
 KVStore :: struct {
     filepath: string,
     mutex: sync.Mutex,
