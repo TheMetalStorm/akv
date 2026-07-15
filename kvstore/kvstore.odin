@@ -6,7 +6,9 @@ import "core:net"
 import "base:runtime"
 import "core:sync"
 import "core:fmt"
+import "core:sys/posix"
 
+// Currently only a Unix implementation is provided, but it should be easy to add a Windows implementation if needed.
 // NOTE: Data stored in file on disk as "key1:value1;key2:value2". Keys and values are percent-encoded to handle special characters. 
 KVStore :: struct {
     filepath: string,
@@ -17,6 +19,7 @@ KVStore :: struct {
 Store_Error :: enum {
 	None = 0,
 	File_Error,
+	File_Lock_Error,
 	Could_Not_Create_Store_Error,
     Indexing_Error,
     Decoding_Error,
@@ -35,20 +38,6 @@ Store_Error :: enum {
 @(private="file") KEY_VAL_DELIMITER_PERCENT_ENCODED : string : "%3A"
 @(private="file") ENTRY_DELIMITER_PERCENT_ENCODED : string : "%3B"
 
-// Returns:
-// - store: Pointer to the opened File or nil if an error occurred
-// - error: If an error occurred during file opening
-@(private="file")
-get_file :: proc(store: ^KVStore) -> (^os.File, Store_Error) {
-    // TODO: maybe hardlock the file with flock (UNIX) or LockFileEx (Windows) to prevent multiple processes from writing to the file at the same time. 
-    // This would require a cross-platform implementation of file locking.
-    file, err := os.open(store.filepath, flags = os.O_RDWR | os.O_CREATE, perm = os.Permissions_Read_Write_All)
-    if err != os.ERROR_NONE {
-        return nil, Store_Error.File_Error
-    }
-    return file, Store_Error.None
-}
-
 
 // build_index reads the data from the file and builds the in-memory index of key-value pairs.
 // Returns:
@@ -56,25 +45,51 @@ get_file :: proc(store: ^KVStore) -> (^os.File, Store_Error) {
 @(private="file")
 build_index :: proc(store: ^KVStore) -> Store_Error {
 
-    file, err := get_file(store)
-    defer os.close(file)
+    lock_file_path := fmt.aprint(store.filepath, ".lock", sep = "")
+    defer delete(lock_file_path)
 
-    if err != Store_Error.None {
-        return err
+    cstr := strings.clone_to_cstring(lock_file_path)
+    defer delete(cstr)
+    
+    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
+    if fd == -1 {
+        return Store_Error.File_Error
+    }
+    defer posix.close(fd)
+
+    lock: posix.flock
+	lock.l_type = posix.Lock_Type.WRLCK; /* [PSX] type of lock. */
+	lock.l_whence = posix.SEEK_SET;   /* [PSX] flag (Whence) of starting offset. */
+    lock.l_start = 0;     /* [PSX] relative offset in bytes. */
+	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
+    res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
+    if res == -1 {
+        return Store_Error.File_Lock_Error
     }
 
-    data, read_err := os.read_entire_file(file, context.allocator)
-    defer delete(data, context.allocator)
+    defer {
+        unlock: posix.flock
+        unlock.l_type = posix.Lock_Type.UNLCK; /* [PSX] type of lock. */
+        unlock.l_whence = posix.SEEK_SET
+        unlock.l_start = 0
+        unlock.l_len = 0
+        posix.fcntl(fd, posix.FCNTL_Cmd.SETLK, &unlock)
+    }
+
+    data, read_err := os.read_entire_file(store.filepath, context.allocator)
     if read_err != os.ERROR_NONE{
         return Store_Error.File_Error
     }
-    data_str := string(data)
+    defer delete(data)
+
+    data_str := strings.clone_from_bytes(data)
+    defer delete(data_str)
+
     lines, alloc_err := strings.split(data_str, ";")
     defer delete(lines, context.allocator)
 
     if alloc_err != runtime.Allocator_Error.None{
         return Store_Error.Parsing_Error
-
     }
 
     for line in lines{
@@ -235,6 +250,37 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
     
+    lock_file_path := fmt.aprint(store.filepath, ".lock", sep = "")
+    defer delete(lock_file_path)
+
+    cstr := strings.clone_to_cstring(lock_file_path)
+    defer delete(cstr)
+    
+    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
+    if fd == -1 {
+        return Store_Error.File_Error
+    }
+    defer posix.close(fd)
+    
+    lock: posix.flock
+	lock.l_type = posix.Lock_Type.WRLCK; /* [PSX] type of lock. */
+	lock.l_whence = posix.SEEK_SET;   /* [PSX] flag (Whence) of starting offset. */
+    lock.l_start = 0;     /* [PSX] relative offset in bytes. */
+	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
+    res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
+    if res == -1 {
+        return Store_Error.File_Lock_Error
+    }
+
+    defer {
+        unlock: posix.flock
+        unlock.l_type = posix.Lock_Type.UNLCK; /* [PSX] type of lock. */
+        unlock.l_whence = posix.SEEK_SET
+        unlock.l_start = 0
+        unlock.l_len = 0
+        posix.fcntl(fd, posix.FCNTL_Cmd.SETLK, &unlock)
+    }
+
     new_lines := strings.builder_make_none()
     defer strings.builder_destroy(&new_lines)
 
@@ -284,8 +330,9 @@ sync :: proc (store: ^KVStore) -> Store_Error {
         return  Store_Error.Sync_Error
     }
 
-    flush_err := os.flush(temp)
-    if flush_err != os.ERROR_NONE {
+     
+    sync_err := os.sync(temp)
+    if sync_err != os.ERROR_NONE {
         os.close(temp)
         return Store_Error.Sync_Error
     }
@@ -300,8 +347,25 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     }
 
     os.remove(bak_path)
-    return Store_Error.None
 
+    data_folder, folder_err := os.open(get_data_folder_path(), flags = os.O_RDONLY )
+    if folder_err != os.ERROR_NONE {
+        return Store_Error.Sync_Error
+    }
+    defer os.close(data_folder)
+
+    sync_err = os.sync(data_folder)
+    if sync_err != os.ERROR_NONE {
+        os.close(temp)
+        return Store_Error.Sync_Error
+    }
+    return Store_Error.None
+}
+
+// TODO: let user set data folder 
+@(private="file")
+get_data_folder_path :: proc() -> string{
+    return "."
 }
 
 // Returns:
