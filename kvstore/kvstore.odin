@@ -369,6 +369,10 @@ get_data_folder_path :: proc() -> string{
     return "."
 }
 
+//TODO: with percent encoding, we can not encode key/value "\r\n" for some reason. 
+// I think this is because the net.percent_encode encodes this in a way that net.percent_decode cant understand
+// Either way we should encode in a different way. 
+
 // Returns:
 // - encoded: The percent-encoded string
 percent_encode :: proc(input: string) -> string {
