@@ -363,6 +363,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 }
 
 // TODO: let user set data folder 
+// TODO: Directory Permissions (0700) so that we control who can access data folder
 @(private="file")
 get_data_folder_path :: proc() -> string{
     return "."
