@@ -16,7 +16,7 @@ Currently in development, not production ready
 
 ## How it works
 
-1. **Initialization:** When `make_store` is called, the library parses the `.db` file and populates an internal Odin map. Keys and values are percent-encoded on disk to cleanly handle delimiters (`:` and `;`).
+1. **Initialization:** When `make_store` is called, the library parses the `.db` file and populates an internal Odin map. Keys and values are length-prefix-encoded on disk.
 2. **Runtime Operations:** All runtime reads, writes, and deletions interact with the in-memory map. Concurrency is managed via an internal `sync.Mutex`, making operations fully thread-safe.
 3. **Memory Ownership:** Because Odin lacks garbage collection, string management is explicit. `read` returns a clone of the value that the caller must free.
 4. **Persistence:** Changes are only persisted to disk when you explicitly call `sync()`.

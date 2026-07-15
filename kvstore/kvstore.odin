@@ -1,20 +1,22 @@
 package kvstore
 
+import "core:strconv"
 import "core:os"
 import "core:strings"
-import "core:net"
 import "base:runtime"
 import "core:sync"
 import "core:fmt"
 import "core:sys/posix"
 
 // Currently only a Unix implementation is provided, but it should be easy to add a Windows implementation if needed.
-// NOTE: Data stored in file on disk as "key1:value1;key2:value2". Keys and values are percent-encoded to handle special characters. 
+// NOTE: We use length-prefixed encoding to store the data in the format "len(data):data"
+// EXAMPLE: 5:hello6:world
 KVStore :: struct {
     filepath: string,
     mutex: sync.Mutex,
     data: map[string]string
 }
+
 
 Store_Error :: enum {
 	None = 0,
@@ -22,22 +24,45 @@ Store_Error :: enum {
 	File_Lock_Error,
 	Could_Not_Create_Store_Error,
     Indexing_Error,
-    Decoding_Error,
     Parsing_Error,
     Key_Not_Found_Error,
     Sync_Error,
     Key_Already_Exists_Error,
     Could_Not_Create_Store_Backup_Error,
-    Could_Not_Restore_Original_File_Error
+    Could_Not_Restore_Original_File_Error,
+    Decoding_Error,
+    Decoding_Error_Missing_Length,
+    Decoding_Error_Missing_Colon,
+    Decoding_Error_Abrupt_End_Of_Data,
+
 }
 
 
-@(private="file") KEY_VAL_DELIMITER : string : ":"
-@(private="file") ENTRY_DELIMITER : string : ";"
+@(private="file") LEN_DELIMITER : string : ":"
 
-@(private="file") KEY_VAL_DELIMITER_PERCENT_ENCODED : string : "%3A"
-@(private="file") ENTRY_DELIMITER_PERCENT_ENCODED : string : "%3B"
 
+@(private="file")
+parse_length_encoded_string :: proc (data_str: string,  data_ptr: ^int)  -> (res: string, err: Store_Error) {
+    len_num: int
+    num, parsed := strconv.parse_int(data_str[data_ptr^:],  n = &len_num)
+    if (num == 0 && len_num == 0 && !parsed){
+        return "", Store_Error.Decoding_Error_Missing_Length
+    }
+
+    data_ptr^ += len_num 
+    
+    if data_str[data_ptr^] != ':' {
+        return "", Store_Error.Decoding_Error_Missing_Colon
+    }
+    
+    data_ptr^ += 1
+    if data_ptr^+num > len(data_str) {
+        return "", Store_Error.Decoding_Error_Abrupt_End_Of_Data    }
+    ret := strings.clone(data_str[data_ptr^:data_ptr^ + num])
+
+    data_ptr^ += num
+    return ret, Store_Error.None
+}
 
 // build_index reads the data from the file and builds the in-memory index of key-value pairs.
 // Returns:
@@ -85,49 +110,62 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
     data_str := strings.clone_from_bytes(data)
     defer delete(data_str)
 
-    lines, alloc_err := strings.split(data_str, ";")
-    defer delete(lines, context.allocator)
+    data_ptr : int = 0
 
-    if alloc_err != runtime.Allocator_Error.None{
-        return Store_Error.Parsing_Error
-    }
+    for(data_ptr < len(data_str)){
 
-    for line in lines{
-        entry, err := strings.split_n(line, ":", 2)
-        
-        if err != runtime.Allocator_Error.None{
-            return Store_Error.Parsing_Error
-        }
-
-        if len(entry) < 2 {
-            delete(entry, context.allocator)
-            continue
-        }
-
-
-        percent_decoded_key, ok := percent_decode(entry[0])
-        if !ok {
-            delete(entry, context.allocator)
-            return Store_Error.Decoding_Error
-        }
-        defer delete(percent_decoded_key) 
-        percent_decoded_val, ok2 := percent_decode(entry[1])
-        if !ok2 {
-            delete(entry, context.allocator)
-            return Store_Error.Decoding_Error
-        }
-        defer delete(percent_decoded_val) 
-
-        key := strings.clone(percent_decoded_key)
-        value := strings.clone(percent_decoded_val)
-
-        store.data[key] = value
-
-        delete(entry, context.allocator)
-
+        key, key_err := parse_length_encoded_string(data_str, &data_ptr)
+        if key_err != Store_Error.None do return key_err
+        val, val_err := parse_length_encoded_string(data_str, &data_ptr)
+        if val_err != Store_Error.None do return val_err
+ 
+        store.data[key] = val
     }
 
     return Store_Error.None
+    // lines, alloc_err := strings.split(data_str, ";")
+    // defer delete(lines, context.allocator)
+
+    // if alloc_err != runtime.Allocator_Error.None{
+    //     return Store_Error.Parsing_Error
+    // }
+
+    // for line in lines{
+    //     entry, err := strings.split_n(line, ":", 2)
+        
+    //     if err != runtime.Allocator_Error.None{
+    //         return Store_Error.Parsing_Error
+    //     }
+
+    //     if len(entry) < 2 {
+    //         delete(entry, context.allocator)
+    //         continue
+    //     }
+
+
+    //     percent_decoded_key, ok := percent_decode(entry[0])
+    //     if !ok {
+    //         delete(entry, context.allocator)
+    //         return Store_Error.Decoding_Error
+    //     }
+    //     defer delete(percent_decoded_key) 
+    //     percent_decoded_val, ok2 := percent_decode(entry[1])
+    //     if !ok2 {
+    //         delete(entry, context.allocator)
+    //         return Store_Error.Decoding_Error
+    //     }
+    //     defer delete(percent_decoded_val) 
+
+    //     key := strings.clone(percent_decoded_key)
+    //     value := strings.clone(percent_decoded_val)
+
+    //     store.data[key] = value
+
+    //     delete(entry, context.allocator)
+
+    // }
+
+    // return Store_Error.None
 
 }
 
@@ -285,15 +323,12 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     defer strings.builder_destroy(&new_lines)
 
     for key, val in store.data {
-        encoded_key := percent_encode(key)
-        encoded_val := percent_encode(val)
-
-        strings.write_string(&new_lines, encoded_key)
-        strings.write_string(&new_lines, KEY_VAL_DELIMITER)
-        strings.write_string(&new_lines, encoded_val)
-        strings.write_string(&new_lines, ENTRY_DELIMITER)
-        delete(encoded_key) 
-        delete(encoded_val) 
+        strings.write_int(&new_lines, (len(key)))
+        strings.write_string(&new_lines, LEN_DELIMITER)
+        strings.write_string(&new_lines, key)
+        strings.write_int(&new_lines, len(val))
+        strings.write_string(&new_lines, LEN_DELIMITER)
+        strings.write_string(&new_lines, val)
     }
 
     
@@ -367,22 +402,4 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 @(private="file")
 get_data_folder_path :: proc() -> string{
     return "."
-}
-
-//TODO: with percent encoding, we can not encode key/value "\r\n" for some reason. 
-// I think this is because the net.percent_encode encodes this in a way that net.percent_decode cant understand
-// Either way we should encode in a different way. 
-
-// Returns:
-// - encoded: The percent-encoded string
-percent_encode :: proc(input: string) -> string {
-    return net.percent_encode(input)
-
-}
-
-// Returns:
-// - decoded: The percent-decoded string
-// - ok: If the decoding was successful
-percent_decode :: proc(input: string) -> (string, bool) {
-    return net.percent_decode(input)
 }
