@@ -10,8 +10,9 @@ Currently in development, not production ready
 - [x] Multithreaded Server Example
 
 ## TODO
-- [ ] Implement OS-level file locking (`flock` / `LockFileEx`) to prevent multi-process data corruption.
-- [ ] Implement atomic file replacement via an interim temporary file swap to protect against crash corruption.
+- [x] Implement OS-level file locking (`flock` / `LockFileEx`) to prevent multi-process data corruption.
+- [x] Implement atomic file replacement via an interim temporary file swap to protect against crash corruption.
+- [ ] Implement support for Windows
 
 ## How it works
 
