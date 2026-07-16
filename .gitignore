@@ -1,6 +1,8 @@
 *.db
+*.lock
 *.bin
 /kvserver
 /usage
+/usagedb
+/serverdb
 .vscode/
-*.lock
