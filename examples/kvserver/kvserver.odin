@@ -73,7 +73,7 @@ deallocate :: proc(server: ^KVServer)  {
 
 init_server :: proc() -> (KVServer, bool) {
 
-	store, store_err := kvstore.make_store()
+	store, store_err := kvstore.make_store("./serverdb")
 	if store_err != kvstore.Store_Error.None {
 		fmt.println("Could not create KV Store, shutting down. Error:", store_err)
 		return {}, false

@@ -28,8 +28,8 @@ main :: proc (){
         }
 	}
 
-    // KV Store name can be specified as an argument, otherwise defaults to "./store.db"
-    store, err := kvstore.make_store()
+    // KV Store base path can be specified as an argument, otherwise defaults to "."
+    store, err := kvstore.make_store("./usagedb")
 
     if err != kvstore.Store_Error.None {
         fmt.println("Failed to create KV store")

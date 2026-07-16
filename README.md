@@ -23,8 +23,8 @@ Currently in development, not production ready
 
 ## API Reference
 
-### `make_store(filepath: string) -> (^KVStore, Store_Error)`
-Initializes the store from a file path. **Note:** This should only be called once on your main thread during initialization.
+### `make_store(base_path: string) -> (^KVStore, Store_Error)`
+Initializes the store in the given base path. **Note:** This should only be called once on your main thread during initialization.
 
 ### `read(store: ^KVStore, key: string) -> (string, Store_Error)`
 Thread-safe read. Returns a cloned copy of the value string. *The caller is responsible for freeing this string.*
