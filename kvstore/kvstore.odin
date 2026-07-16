@@ -11,8 +11,10 @@ import "core:sys/posix"
 // Currently only a Unix implementation is provided, but it should be easy to add a Windows implementation if needed.
 // NOTE: We use length-prefixed encoding to store the data in the format "len(data):data"
 // EXAMPLE: 5:hello5:world
+
+// TODO: instead of aprint we should use os path methods
 KVStore :: struct {
-    filepath: string,
+    base_path: string,
     mutex: sync.Mutex,
     data: map[string]string
 }
@@ -20,6 +22,9 @@ KVStore :: struct {
 
 Store_Error :: enum {
 	None = 0,
+	Empty_Base_Path_Error,
+    Base_Path_Points_At_File_Error,
+    Could_Not_Create_Base_Path_Folder_Error,
 	File_Error,
 	File_Lock_Error,
 	Could_Not_Create_Store_Error,
@@ -37,7 +42,7 @@ Store_Error :: enum {
 
 }
 
-
+@(private="file") STORE_NAME : string : "data.db"
 @(private="file") LEN_DELIMITER : string : ":"
 
 
@@ -64,13 +69,14 @@ parse_length_encoded_string :: proc (data_str: string,  data_ptr: ^int)  -> (res
     return ret, Store_Error.None
 }
 
+//TODO: Makee Paths windows compatible 
 // build_index reads the data from the file and builds the in-memory index of key-value pairs.
 // Returns:
 // - error: If an error occurred during indexing, otherwise returns Store_Error.None
 @(private="file")
 build_index :: proc(store: ^KVStore) -> Store_Error {
 
-    lock_file_path := fmt.aprint(store.filepath, ".lock", sep = "")
+    lock_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".lock", sep = "")
     defer delete(lock_file_path)
 
     cstr := strings.clone_to_cstring(lock_file_path)
@@ -101,7 +107,16 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
         posix.fcntl(fd, posix.FCNTL_Cmd.SETLK, &unlock)
     }
 
-    data, read_err := os.read_entire_file(store.filepath, context.allocator)
+    store_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, sep = "")
+    defer delete(store_file_path)
+    if !os.exists(store_file_path){
+        f, err := os.create(store_file_path)
+        if err != os.ERROR_NONE {
+            return Store_Error.File_Error
+        }
+        os.close(f)
+    }
+    data, read_err := os.read_entire_file(store_file_path, context.allocator)
     if read_err != os.ERROR_NONE{
         return Store_Error.File_Error
     }
@@ -123,50 +138,6 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
     }
 
     return Store_Error.None
-    // lines, alloc_err := strings.split(data_str, ";")
-    // defer delete(lines, context.allocator)
-
-    // if alloc_err != runtime.Allocator_Error.None{
-    //     return Store_Error.Parsing_Error
-    // }
-
-    // for line in lines{
-    //     entry, err := strings.split_n(line, ":", 2)
-        
-    //     if err != runtime.Allocator_Error.None{
-    //         return Store_Error.Parsing_Error
-    //     }
-
-    //     if len(entry) < 2 {
-    //         delete(entry, context.allocator)
-    //         continue
-    //     }
-
-
-    //     percent_decoded_key, ok := percent_decode(entry[0])
-    //     if !ok {
-    //         delete(entry, context.allocator)
-    //         return Store_Error.Decoding_Error
-    //     }
-    //     defer delete(percent_decoded_key) 
-    //     percent_decoded_val, ok2 := percent_decode(entry[1])
-    //     if !ok2 {
-    //         delete(entry, context.allocator)
-    //         return Store_Error.Decoding_Error
-    //     }
-    //     defer delete(percent_decoded_val) 
-
-    //     key := strings.clone(percent_decoded_key)
-    //     value := strings.clone(percent_decoded_val)
-
-    //     store.data[key] = value
-
-    //     delete(entry, context.allocator)
-
-    // }
-
-    // return Store_Error.None
-
 }
 
 // make_store creates a new KVStore instance and initializes it with the data from the file at the specified filepath.
@@ -176,11 +147,27 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 // - error: If an error occurred during store creation or initialization
 
 // Call this once on main thread to create the store. Do not call this on multiple threads.
-make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (^KVStore, Store_Error) {
+make_store :: proc(base_path:= ".", allocator := context.allocator) -> (^KVStore, Store_Error) {
     store, err := new(KVStore, allocator)
     if err != nil do return nil, Store_Error.Could_Not_Create_Store_Error
 
-    store.filepath = strings.clone(filepath, allocator)
+
+    if strings.trim_space(base_path) == ""{
+        return nil, Store_Error.Empty_Base_Path_Error
+    }
+
+    if !os.is_directory(base_path){
+        if os.is_file(base_path){
+            return nil, Store_Error.Base_Path_Points_At_File_Error
+        }
+        err := os.make_directory_all(base_path)
+        if err != os.ERROR_NONE {
+            return nil, Store_Error.Could_Not_Create_Base_Path_Folder_Error
+        }
+    }
+    //TODO: better default base path
+
+    store.base_path = strings.clone(base_path, allocator)
     store.data = {} 
 
     store_err := build_index(store)
@@ -195,7 +182,7 @@ make_store :: proc(filepath:= "./store.db", allocator := context.allocator) -> (
 // deallocate frees the memory used by the KVStore instance and its associated data.
 deallocate :: proc(store: ^KVStore){
 
-    delete(store.filepath)
+    delete(store.base_path)
     for key, val in store.data{
         delete(key)
         delete(val)
@@ -288,7 +275,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
     
-    lock_file_path := fmt.aprint(store.filepath, ".lock", sep = "")
+    lock_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".lock", sep = "")
     defer delete(lock_file_path)
 
     cstr := strings.clone_to_cstring(lock_file_path)
@@ -332,26 +319,28 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     }
 
     
-    temp_dir, mkdir_err := os.make_directory_temp(".", "kvstore_sync_temp_dir", context.allocator )
+    temp_dir, mkdir_err := os.make_directory_temp(store.base_path, "kvstore_sync_temp_dir", context.allocator )
+
     defer delete(temp_dir)
     defer os.remove(temp_dir)
 
     if mkdir_err != os.ERROR_NONE{
-        fmt.println("Failed to create temporary directory during sync")
         return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
     
     temp, temp_err := os.create_temp_file(temp_dir, "kvstore_sync_temp")
     if temp_err != os.ERROR_NONE{
         os.close(temp)
-        fmt.println("Failed to create temporary file during sync")
         return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
+
+    bak_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".bak", sep = "")
+    defer delete(bak_file_path)
     
-    bak_path := fmt.aprint(store.filepath, ".bak", sep = "")
-    defer delete(bak_path)
-    
-    copy_err := os.copy_file( bak_path,store.filepath)
+    file_path := fmt.aprint(store.base_path, "/", STORE_NAME, sep = "")
+    defer delete(file_path)
+
+    copy_err := os.copy_file( bak_file_path, file_path)
 
     if copy_err != os.ERROR_NONE{
         os.close(temp)
@@ -361,7 +350,6 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     _, write_err := os.write_string(temp, strings.to_string(new_lines))
     if write_err != os.ERROR_NONE{
         os.close(temp)
-        fmt.println("Failed to write to temporary file during sync")
         return  Store_Error.Sync_Error
     }
 
@@ -376,14 +364,14 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     temp_filepath := strings.clone(os.name(temp))
     defer delete(temp_filepath)
     os.close(temp)
-    rename_err := os.rename(temp_filepath, store.filepath)
+    rename_err := os.rename(temp_filepath, file_path)
     if rename_err != os.ERROR_NONE{
         return Store_Error.Sync_Error
     }
 
-    os.remove(bak_path)
+    os.remove(bak_file_path)
 
-    data_folder, folder_err := os.open(get_data_folder_path(), flags = os.O_RDONLY )
+    data_folder, folder_err := os.open(get_data_folder_path(store), flags = os.O_RDONLY )
     if folder_err != os.ERROR_NONE {
         return Store_Error.Sync_Error
     }
@@ -397,9 +385,8 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     return Store_Error.None
 }
 
-// TODO: let user set data folder 
 // TODO: Directory Permissions (0700) so that we control who can access data folder
 @(private="file")
-get_data_folder_path :: proc() -> string{
-    return "."
+get_data_folder_path :: proc( store: ^KVStore) -> string{
+    return store.base_path
 }
