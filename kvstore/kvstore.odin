@@ -165,7 +165,6 @@ make_store :: proc(base_path:= ".", allocator := context.allocator) -> (^KVStore
             return nil, Store_Error.Could_Not_Create_Base_Path_Folder_Error
         }
     }
-    //TODO: better default base path
 
     store.base_path = strings.clone(base_path, allocator)
     store.data = {} 
