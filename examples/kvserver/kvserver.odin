@@ -37,7 +37,7 @@ main :: proc() {
 
 	// --------------------------------------------------------------------------------------------
     // Only here for development debugging purposes 
-	
+
     track: mem.Tracking_Allocator
     
     when ODIN_DEBUG {
@@ -79,7 +79,7 @@ deallocate :: proc(server: ^KVServer)  {
 init_server :: proc() -> (KVServer, bool) {
 
 	store, store_err := kvstore.make_store("./serverdb")
-	if store_err != kvstore.Store_Error.None {
+	if store_err != nil {
 		fmt.println("Could not create KV Store, shutting down. Error:", store_err)
 		return {}, false
 	}
@@ -181,10 +181,10 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 		
 					remove_err := kvstore.remove(server.store, trimmed)
 
-					if remove_err == kvstore.Store_Error.None {
+					if remove_err == nil {
 						sync_err := kvstore.sync(server.store)
 
-						if sync_err != kvstore.Store_Error.None {
+						if sync_err != nil {
 							fmt.println("Failed to sync store after deleting key:", trimmed)
 							send(sock, "Failed to sync store!\n")
 						}
@@ -217,7 +217,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 
 					value, err := kvstore.read(server.store, trimmed)
 					defer delete(value, context.allocator)
-					if err == kvstore.Store_Error.None {
+					if err == nil {
 						fmt.println("Retrieved value for key:", trimmed, "value:", value)
 						send(sock, value)
 						send(sock, "\n")
@@ -254,13 +254,13 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					}
 
 					write_err := kvstore.write(server.store, trimmed_key, trimmed_val)
-					if write_err != kvstore.Store_Error.None {
+					if write_err != nil {
 						fmt.println("Failed to write key-value pair:", trimmed_key, trimmed_val)
 						send(sock, "Failed to write key-value pair!\n")
 					}
 					else {
 						sync_err := kvstore.sync(server.store)
-						if sync_err != kvstore.Store_Error.None {
+						if sync_err != nil {
 							fmt.println("Failed to sync store after writing key-value pair:", trimmed_key, trimmed_val)
 							send(sock, "Failed to sync store!\n")
 						}

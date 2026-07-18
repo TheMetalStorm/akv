@@ -18,28 +18,35 @@ KVStore :: struct {
 }
 
 
-Store_Error :: enum {
-	None = 0,
-	Empty_Base_Path,
-    Path,
-    Truncated_Entry,
-    Base_Path_Points_At_File,
-    Could_Not_Create_Base_Path_Folder,
-	File,
-	File_Lock,
-	Could_Not_Create_Store,
-    Indexing,
-    Parsing,
-    Key_Not_Found,
-    Sync,
-    Key_Already_Exists,
-    Could_Not_Create_Store_Backup,
-    Could_Not_Restore_Original_File,
+Store_Error :: union #shared_nil {
+    os.Error,
+    runtime.Allocator_Error,
+    Parse_Error,
+    Key_Error,
+    Init_Error,
+}
+
+Parse_Error :: enum {
+    None = 0,
     Decoding,
     Decoding_Missing_Length,
     Decoding_Missing_Colon,
     Decoding_Abrupt_End_Of_Data,
+    Truncated_Entry,
+    Indexing,
+    Parsing,
+}
 
+Key_Error :: enum {
+    None = 0,
+    Key_Not_Found,
+    Key_Already_Exists,
+}
+
+Init_Error :: enum {
+    None = 0,
+    Empty_Base_Path,
+    Base_Path_Points_At_File,
 }
 
 @(private="file") STORE_NAME : string : "data.db"
@@ -54,37 +61,37 @@ parse_length_encoded_string :: proc (data_str: string,  data_ptr: ^int)  -> (res
     len_num: int
     num, parsed := strconv.parse_int(data_str[data_ptr^:],  n = &len_num)
     if (num == 0 && len_num == 0 && !parsed){
-        return "", Store_Error.Decoding_Missing_Length
+        return "", Parse_Error.Decoding_Missing_Length
     }
     
     if data_ptr^+len_num >= len(data_str) {
-        return "", Store_Error.Truncated_Entry    
+        return "", Parse_Error.Truncated_Entry    
     }
 
     data_ptr^ += len_num 
     
     if data_str[data_ptr^] != ':' {
-        return "", Store_Error.Decoding_Missing_Colon
+        return "", Parse_Error.Decoding_Missing_Colon
     }
     
     data_ptr^ += 1
     if data_ptr^+num > len(data_str) {
-        return "", Store_Error.Decoding_Abrupt_End_Of_Data    }
+        return "", Parse_Error.Decoding_Abrupt_End_Of_Data    }
     ret := strings.clone(data_str[data_ptr^:data_ptr^ + num])
 
     data_ptr^ += num
-    return ret, Store_Error.None
+    return ret, nil
 }
 
 // build_index reads the data from the file and builds the in-memory index of key-value pairs.
 // Returns:
-// - error: If an error occurred during indexing, otherwise returns Store_Error.None
+// - error: If an error occurred during indexing, otherwise returns nil
 @(private="file")
 build_index :: proc(store: ^KVStore) -> Store_Error {
 
     lock_file_path, lock_file_err := os.join_path({store.base_path, STORE_LOCK_NAME}, context.allocator)
     if lock_file_err != runtime.Allocator_Error.None {
-        return Store_Error.Path
+        return lock_file_err
     }
     defer delete(lock_file_path)
 
@@ -93,7 +100,7 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
     
     fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
     if fd == -1 {
-        return Store_Error.File
+        return os.Error(os.Platform_Error(i32(posix.errno())))
     }
     defer posix.close(fd)
 
@@ -104,7 +111,7 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
     res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
     if res == -1 {
-        return Store_Error.File_Lock
+        return os.Error(os.Platform_Error(i32(posix.errno())))
     }
 
     defer {
@@ -118,20 +125,20 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 
     store_file_path, store_file_err := os.join_path({store.base_path, STORE_NAME}, context.allocator)
     if store_file_err != runtime.Allocator_Error.None {
-        return Store_Error.Path
+        return store_file_err
     }
     defer delete(store_file_path)
 
     if !os.exists(store_file_path){
-        f, err := os.create(store_file_path)
-        if err != os.ERROR_NONE {
-            return Store_Error.File
+        f, create_err := os.create(store_file_path)
+        if create_err != os.ERROR_NONE {
+            return create_err
         }
         os.close(f)
     }
     data, read_err := os.read_entire_file(store_file_path, context.allocator)
     if read_err != os.ERROR_NONE{
-        return Store_Error.File
+        return read_err
     }
     defer delete(data)
 
@@ -143,14 +150,14 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
     for(data_ptr < len(data_str)){
 
         key, key_err := parse_length_encoded_string(data_str, &data_ptr)
-        if key_err != Store_Error.None do return key_err
+        if key_err != nil do return key_err
         val, val_err := parse_length_encoded_string(data_str, &data_ptr)
-        if val_err != Store_Error.None do return val_err
+        if val_err != nil do return val_err
  
         store.data[key] = val
     }
 
-    return Store_Error.None
+    return nil
 }
 
 // make_store creates a new KVStore instance and initializes it with the data from the file at the specified filepath.
@@ -161,21 +168,21 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 
 // Call this once on main thread to create the store. Do not call this on multiple threads.
 make_store :: proc(base_path:= ".", allocator := context.allocator) -> (^KVStore, Store_Error) {
-    store, err := new(KVStore, allocator)
-    if err != nil do return nil, Store_Error.Could_Not_Create_Store
+    store, alloc_err := new(KVStore, allocator)
+    if alloc_err != runtime.Allocator_Error.None do return nil, alloc_err
 
 
     if strings.trim_space(base_path) == ""{
-        return nil, Store_Error.Empty_Base_Path
+        return nil, Init_Error.Empty_Base_Path
     }
 
     if !os.is_directory(base_path){
         if os.is_file(base_path){
-            return nil, Store_Error.Base_Path_Points_At_File
+            return nil, Init_Error.Base_Path_Points_At_File
         }
-        err := os.make_directory_all(base_path)
-        if err != os.ERROR_NONE {
-            return nil, Store_Error.Could_Not_Create_Base_Path_Folder
+        mkdir_err := os.make_directory_all(base_path)
+        if mkdir_err != os.ERROR_NONE {
+            return nil, mkdir_err
         }
     }
 
@@ -183,12 +190,12 @@ make_store :: proc(base_path:= ".", allocator := context.allocator) -> (^KVStore
     store.data = {} 
 
     store_err := build_index(store)
-    if store_err != Store_Error.None {
+    if store_err != nil {
         deallocate(store)
         return nil, store_err
     }
 
-    return store, Store_Error.None
+    return store, nil
 }
 
 // deallocate frees the memory used by the KVStore instance and its associated data.
@@ -223,16 +230,16 @@ key_exists :: proc(store: ^KVStore, key: string) -> bool {
 
 // Returns:
 // - value: The matching copy of the value string. **The caller is responsible for freeing this 
-// - error: If an error occurred during reading a value from the store, otherwise returns Store_Error.None
+// - error: If an error occurred during reading a value from the store, otherwise returns nil
 read :: proc (store: ^KVStore, key: string) -> (string, Store_Error) {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
 
     value, ok := store.data[key]
     if ok{
-        return strings.clone(value), Store_Error.None
+        return strings.clone(value), nil
     }
-    return "", Store_Error.Key_Not_Found
+    return "", Key_Error.Key_Not_Found
 
 }
 
@@ -242,17 +249,17 @@ read :: proc (store: ^KVStore, key: string) -> (string, Store_Error) {
 // The caller retains ownership of the original strings.
 
 // Returns:
-// - error: If an error occurred during writing to the store, otherwise returns Store_Error.None
+// - error: If an error occurred during writing to the store, otherwise returns nil
 write :: proc (store: ^KVStore, key: string, value: string) -> Store_Error {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
 
     if _, found := store.data[key]; found { 
-        return Store_Error.Key_Already_Exists
+        return Key_Error.Key_Already_Exists
     }
 
     store.data[strings.clone(key)] = strings.clone(value)
-    return Store_Error.None
+    return nil
 
 }
 
@@ -260,7 +267,7 @@ write :: proc (store: ^KVStore, key: string, value: string) -> Store_Error {
 // remove removes a key-value pair from the store.
 
 // Returns:
-// - error: If an error occurred during removing the key-value pair, otherwise returns Store_Error.None
+// - error: If an error occurred during removing the key-value pair, otherwise returns nil
 remove :: proc (store: ^KVStore, key: string) -> Store_Error{
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
@@ -268,28 +275,28 @@ remove :: proc (store: ^KVStore, key: string) -> Store_Error{
     value : string
     found : bool
     if value, found = store.data[key]; !found {
-        return Store_Error.Key_Not_Found
+        return Key_Error.Key_Not_Found
     }
 
     kk, vk := delete_key(&store.data, key)
     delete(kk)
     delete(vk)
     
-    return Store_Error.None
+    return nil
 }
 
 
 // Write the updated data in the Store to file
 
 // Returns:
-// - error: If an error occurred during syncing the store to file, otherwise returns Store_Error.None
+// - error: If an error occurred during syncing the store to file, otherwise returns nil
 sync :: proc (store: ^KVStore) -> Store_Error {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
     
     lock_file_path, err := os.join_path({store.base_path, STORE_LOCK_NAME}, context.allocator)
     if err != runtime.Allocator_Error.None {
-        return Store_Error.Path
+        return err
     }
     defer delete(lock_file_path)
 
@@ -298,7 +305,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     
     fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
     if fd == -1 {
-        return Store_Error.File
+        return os.Error(os.Platform_Error(i32(posix.errno())))
     }
     defer posix.close(fd)
     
@@ -309,7 +316,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
     res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
     if res == -1 {
-        return Store_Error.File_Lock
+        return os.Error(os.Platform_Error(i32(posix.errno())))
     }
 
     defer {
@@ -340,23 +347,23 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     defer os.remove(temp_dir)
 
     if mkdir_err != os.ERROR_NONE{
-        return  Store_Error.Could_Not_Create_Store_Backup
+        return  mkdir_err
     }
     
     temp, temp_err := os.create_temp_file(temp_dir, "kvstore_sync_temp")
     if temp_err != os.ERROR_NONE{
-        return  Store_Error.Could_Not_Create_Store_Backup
+        return  temp_err
     }
 
     bak_file_path, bak_err := os.join_path({store.base_path, STORE_BAK_NAME}, context.allocator)
     if bak_err != runtime.Allocator_Error.None {
-        return Store_Error.Path
+        return bak_err
     }
     defer delete(bak_file_path)
     
     file_path, file_path_err := os.join_path({store.base_path, STORE_NAME},context.allocator)
     if file_path_err != runtime.Allocator_Error.None {
-        return Store_Error.Path
+        return file_path_err
     }
     defer delete(file_path)
 
@@ -364,20 +371,20 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 
     if copy_err != os.ERROR_NONE{
         os.close(temp)
-        return  Store_Error.Could_Not_Create_Store_Backup
+        return  copy_err
     }
 
     _, write_err := os.write_string(temp, strings.to_string(new_lines))
     if write_err != os.ERROR_NONE{
         os.close(temp)
-        return  Store_Error.Sync
+        return  write_err
     }
 
      
     sync_err := os.sync(temp)
     if sync_err != os.ERROR_NONE {
         os.close(temp)
-        return Store_Error.Sync
+        return sync_err
     }
 
 
@@ -386,22 +393,22 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     os.close(temp)
     rename_err := os.rename(temp_filepath, file_path)
     if rename_err != os.ERROR_NONE{
-        return Store_Error.Sync
+        return rename_err
     }
 
     os.remove(bak_file_path)
 
     data_folder, folder_err := os.open(get_data_folder_path(store), flags = os.O_RDONLY )
     if folder_err != os.ERROR_NONE {
-        return Store_Error.Sync
+        return folder_err
     }
     defer os.close(data_folder)
 
     sync_err = os.sync(data_folder)
     if sync_err != os.ERROR_NONE {
-        return Store_Error.Sync
+        return sync_err
     }
-    return Store_Error.None
+    return nil
 }
 
 // TODO: Directory Permissions (0700) so that we control who can access data folder

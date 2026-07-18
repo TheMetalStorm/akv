@@ -9,7 +9,7 @@ main :: proc (){
 
     // --------------------------------------------------------------------------------------------
     // Only here for development debugging purposes 
-    
+
     when ODIN_DEBUG {
         track: mem.Tracking_Allocator
         mem.tracking_allocator_init(&track, context.allocator)
@@ -35,7 +35,7 @@ main :: proc (){
 
     // KV Store base path can be specified as an argument, otherwise defaults to "."
     store, err := kvstore.make_store("./usagedb")
-    if err != kvstore.Store_Error.None {
+    if err != nil {
         fmt.println("Failed to create KV store. Error:", err)
         return
     }
@@ -45,7 +45,7 @@ main :: proc (){
 
     // Write an entry to the store
     write_err := kvstore.write(store, key, value)
-    if write_err != kvstore.Store_Error.None {
+    if write_err != nil {
         fmt.println("Failed to write to KV store")
     }
     else {
@@ -55,7 +55,7 @@ main :: proc (){
     // Read the entry back from the store
     read, read_ok := kvstore.read(store, key)
     defer delete(read, context.allocator)
-    if read_ok == kvstore.Store_Error.None {
+    if read_ok == nil {
         fmt.println("Retrieved entry for key '", key, "': ", read)
     }
     else {
@@ -65,7 +65,7 @@ main :: proc (){
 
     // Remove the entry from the store
     del_err := kvstore.remove(store, key)
-    if del_err != kvstore.Store_Error.None {
+    if del_err != nil {
         fmt.println("Failed to delete entry")
     }
     else {
@@ -74,7 +74,7 @@ main :: proc (){
 
     // Sync the store to disk 
     sync_err := kvstore.sync(store)
-    if sync_err != kvstore.Store_Error.None {
+    if sync_err != nil {
         fmt.println("Failed to sync store. Error: ", sync_err)
     }
 

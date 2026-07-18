@@ -46,7 +46,7 @@ import "kvstore"
 
 main :: proc() {
     store, err := kvstore.make_store("./mydb")
-    if err != kvstore.Store_Error.None {
+    if err != nil {
         fmt.println("Failed to create KV store:", err)
         return
     }
@@ -55,7 +55,7 @@ main :: proc() {
     kvstore.write(store, "hello", "world")
     kvstore.write(store, "foo", "bar")
 
-    if value, ok := kvstore.read(store, "hello"); ok == kvstore.Store_Error.None {
+    if value, value_err := kvstore.read(store, "hello"); value_err == nil {
         defer delete(value)
         fmt.println("hello =", value)
     }
@@ -70,17 +70,31 @@ main :: proc() {
 
 ## API Reference
 
+All functions return `Store_Error`, a `#shared_nil` union:
+
+```odin
+Store_Error :: union #shared_nil {
+    os.Error,                  // filesystem/IO/platform errors
+    runtime.Allocator_Error,   // memory allocation errors
+    Parse_Error,               // index decoding errors
+    Key_Error,                 // key conflicts/not found
+    Init_Error,                // invalid config
+}
+```
+
+Callers check `if err != nil` and can type-switch on the union variant for specific handling.
+
 ### `make_store(base_path:= ".", allocator := context.allocator) -> (^KVStore, Store_Error)`
 Initializes the store in the given base path. **Note:** This should only be called once on your main thread during initialization.
 
 ### `read(store: ^KVStore, key: string) -> (string, Store_Error)`
-Thread-safe read. Returns a cloned copy of the value string. *The caller is responsible for freeing this string.*
+Thread-safe read. Returns a cloned copy of the value string. *The caller is responsible for freeing this string.* Returns `Key_Error.Key_Not_Found` if absent.
 
 ### `write(store: ^KVStore, key: string, value: string) -> Store_Error`
-Thread-safe insert. Returns `Key_Already_Exists_Error` if the key already exists.
+Thread-safe insert. Returns `Key_Error.Key_Already_Exists` if the key already exists.
 
 ### `remove(store: ^KVStore, key: string) -> Store_Error`
-Thread-safe deletion of a key and its value from the store.
+Thread-safe deletion of a key and its value from the store. Returns `Key_Error.Key_Not_Found` if absent.
 
 ### `sync(store: ^KVStore) -> Store_Error`
 Flushes the in-memory map back to disk.
