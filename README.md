@@ -42,29 +42,29 @@ Connect to the server with `telnet 127.0.0.1 8080` and use commands: `PUT key va
 package main
 
 import "core:fmt"
-import "kvstore"
+import "akv"
 
 main :: proc() {
-    store, err := kvstore.make_store("./mydb")
+    store, err := akv.make_store("./mydb")
     if err != nil {
         fmt.println("Failed to create KV store:", err)
         return
     }
-    defer kvstore.deallocate(store)
+    defer akv.deallocate(store)
 
-    kvstore.write(store, "hello", "world")
-    kvstore.write(store, "foo", "bar")
+    akv.write(store, "hello", "world")
+    akv.write(store, "foo", "bar")
 
-    if value, value_err := kvstore.read(store, "hello"); value_err == nil {
+    if value, value_err := akv.read(store, "hello"); value_err == nil {
         defer delete(value)
         fmt.println("hello =", value)
     }
 
-    if kvstore.key_exists(store, "foo") {
-        kvstore.remove(store, "foo")
+    if akv.key_exists(store, "foo") {
+        akv.remove(store, "foo")
     }
 
-    kvstore.sync(store)
+    akv.sync(store)
 }
 ```
 

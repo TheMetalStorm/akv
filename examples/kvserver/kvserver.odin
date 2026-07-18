@@ -10,10 +10,10 @@ import "base:runtime"
 import "core:mem"
 import "core:thread"
 
-import "../../kvstore"
+import "../../akv"
 
 KVServer :: struct{
-	store: ^kvstore.KVStore,
+	store: ^akv.KVStore,
 	endpoint: net.Endpoint
 }
 
@@ -73,12 +73,12 @@ main :: proc() {
 }
 
 deallocate :: proc(server: ^KVServer)  {
-	kvstore.deallocate(server.store)
+	akv.deallocate(server.store)
 }
 
 init_server :: proc() -> (KVServer, bool) {
 
-	store, store_err := kvstore.make_store("./serverdb")
+	store, store_err := akv.make_store("./serverdb")
 	if store_err != nil {
 		fmt.println("Could not create KV Store, shutting down. Error:", store_err)
 		return {}, false
@@ -179,10 +179,10 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if len(del_key) == 1 {
 					trimmed  := strings.trim_space(del_key[0])
 		
-					remove_err := kvstore.remove(server.store, trimmed)
+					remove_err := akv.remove(server.store, trimmed)
 
 					if remove_err == nil {
-						sync_err := kvstore.sync(server.store)
+						sync_err := akv.sync(server.store)
 
 						if sync_err != nil {
 							fmt.println("Failed to sync store after deleting key:", trimmed)
@@ -215,7 +215,7 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 				if len(get_key) == 1 {
 					trimmed  := strings.trim_space(get_key[0])
 
-					value, err := kvstore.read(server.store, trimmed)
+					value, err := akv.read(server.store, trimmed)
 					defer delete(value, context.allocator)
 					if err == nil {
 						fmt.println("Retrieved value for key:", trimmed, "value:", value)
@@ -247,19 +247,19 @@ handle_command :: proc(server: ^KVServer, sock: net.TCP_Socket){
 					trimmed_key  := strings.trim_space(put_key_val[0])
 					trimmed_val  := strings.trim_space(put_key_val[1])
 
-					if kvstore.key_exists(server.store, trimmed_key){
+					if akv.key_exists(server.store, trimmed_key){
 						fmt.println("Key already exists in store:", trimmed_key)
 						send(sock, "Key already exists in store!\n")
 						continue
 					}
 
-					write_err := kvstore.write(server.store, trimmed_key, trimmed_val)
+					write_err := akv.write(server.store, trimmed_key, trimmed_val)
 					if write_err != nil {
 						fmt.println("Failed to write key-value pair:", trimmed_key, trimmed_val)
 						send(sock, "Failed to write key-value pair!\n")
 					}
 					else {
-						sync_err := kvstore.sync(server.store)
+						sync_err := akv.sync(server.store)
 						if sync_err != nil {
 							fmt.println("Failed to sync store after writing key-value pair:", trimmed_key, trimmed_val)
 							send(sock, "Failed to sync store!\n")

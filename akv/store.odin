@@ -1,4 +1,4 @@
-package kvstore
+package akv
 
 import "core:strconv"
 import "core:os"
@@ -98,17 +98,17 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
     cstr := strings.clone_to_cstring(lock_file_path)
     defer delete(cstr)
     
-    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
+    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT}, {.IRUSR, .IWUSR, .IRGRP, .IROTH})
     if fd == -1 {
         return os.Error(os.Platform_Error(i32(posix.errno())))
     }
     defer posix.close(fd)
 
     lock: posix.flock
-	lock.l_type = posix.Lock_Type.WRLCK; /* [PSX] type of lock. */
-	lock.l_whence = posix.SEEK_SET;   /* [PSX] flag (Whence) of starting offset. */
-    lock.l_start = 0;     /* [PSX] relative offset in bytes. */
-	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
+	lock.l_type = posix.Lock_Type.WRLCK
+	lock.l_whence = posix.SEEK_SET
+    lock.l_start = 0
+	lock.l_len = 0
     res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
     if res == -1 {
         return os.Error(os.Platform_Error(i32(posix.errno())))
@@ -116,7 +116,7 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
 
     defer {
         unlock: posix.flock
-        unlock.l_type = posix.Lock_Type.UNLCK; /* [PSX] type of lock. */
+        unlock.l_type = posix.Lock_Type.UNLCK
         unlock.l_whence = posix.SEEK_SET
         unlock.l_start = 0
         unlock.l_len = 0
@@ -303,17 +303,17 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     cstr := strings.clone_to_cstring(lock_file_path)
     defer delete(cstr)
     
-    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT})
+    fd := posix.open(cstr, posix.O_Flags{.RDWR, .CREAT}, {.IRUSR, .IWUSR, .IRGRP, .IROTH})
     if fd == -1 {
         return os.Error(os.Platform_Error(i32(posix.errno())))
     }
     defer posix.close(fd)
     
     lock: posix.flock
-	lock.l_type = posix.Lock_Type.WRLCK; /* [PSX] type of lock. */
-	lock.l_whence = posix.SEEK_SET;   /* [PSX] flag (Whence) of starting offset. */
-    lock.l_start = 0;     /* [PSX] relative offset in bytes. */
-	lock.l_len = 0;     /* [PSX] size; if 0 then until EOF. */
+	lock.l_type = posix.Lock_Type.WRLCK
+	lock.l_whence = posix.SEEK_SET
+    lock.l_start = 0
+	lock.l_len = 0
     res := posix.fcntl(fd, posix.FCNTL_Cmd.SETLKW, &lock)
     if res == -1 {
         return os.Error(os.Platform_Error(i32(posix.errno())))
@@ -321,7 +321,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 
     defer {
         unlock: posix.flock
-        unlock.l_type = posix.Lock_Type.UNLCK; /* [PSX] type of lock. */
+        unlock.l_type = posix.Lock_Type.UNLCK
         unlock.l_whence = posix.SEEK_SET
         unlock.l_start = 0
         unlock.l_len = 0
@@ -341,7 +341,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     }
 
     
-    temp_dir, mkdir_err := os.make_directory_temp(store.base_path, "kvstore_sync_temp_dir", context.allocator )
+    temp_dir, mkdir_err := os.make_directory_temp(store.base_path, "akv_sync_temp_dir", context.allocator )
 
     defer delete(temp_dir)
     defer os.remove(temp_dir)
@@ -350,7 +350,7 @@ sync :: proc (store: ^KVStore) -> Store_Error {
         return  mkdir_err
     }
     
-    temp, temp_err := os.create_temp_file(temp_dir, "kvstore_sync_temp")
+    temp, temp_err := os.create_temp_file(temp_dir, "akv_sync_temp")
     if temp_err != os.ERROR_NONE{
         return  temp_err
     }

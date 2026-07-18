@@ -3,7 +3,7 @@ package usage
 import "core:fmt"
 import "core:mem"
 
-import "../../kvstore"
+import "../../akv"
 
 main :: proc (){
 
@@ -34,7 +34,7 @@ main :: proc (){
     // --------------------------------------------------------------------------------------------
 
     // KV Store base path can be specified as an argument, otherwise defaults to "."
-    store, err := kvstore.make_store("./usagedb")
+    store, err := akv.make_store("./usagedb")
     if err != nil {
         fmt.println("Failed to create KV store. Error:", err)
         return
@@ -44,7 +44,7 @@ main :: proc (){
     value := ";world; "
 
     // Write an entry to the store
-    write_err := kvstore.write(store, key, value)
+    write_err := akv.write(store, key, value)
     if write_err != nil {
         fmt.println("Failed to write to KV store")
     }
@@ -53,7 +53,7 @@ main :: proc (){
     }
 
     // Read the entry back from the store
-    read, read_ok := kvstore.read(store, key)
+    read, read_ok := akv.read(store, key)
     defer delete(read, context.allocator)
     if read_ok == nil {
         fmt.println("Retrieved entry for key '", key, "': ", read)
@@ -64,7 +64,7 @@ main :: proc (){
     }
 
     // Remove the entry from the store
-    del_err := kvstore.remove(store, key)
+    del_err := akv.remove(store, key)
     if del_err != nil {
         fmt.println("Failed to delete entry")
     }
@@ -73,13 +73,13 @@ main :: proc (){
     }
 
     // Sync the store to disk 
-    sync_err := kvstore.sync(store)
+    sync_err := akv.sync(store)
     if sync_err != nil {
         fmt.println("Failed to sync store. Error: ", sync_err)
     }
 
     // Deallocate the store and free memory 
-    kvstore.deallocate(store)
+    akv.deallocate(store)
 
 
 }

@@ -3,6 +3,6 @@
 *.bin
 /kvserver
 /usage
-/usagedb
-/serverdb
+usagedb/
+serverdb/
 .vscode/
