@@ -22,6 +22,7 @@ Store_Error :: enum {
 	None = 0,
 	Empty_Base_Path_Error,
     Path_Error,
+    Truncated_Entry,
     Base_Path_Points_At_File_Error,
     Could_Not_Create_Base_Path_Folder_Error,
 	File_Error,
@@ -54,6 +55,10 @@ parse_length_encoded_string :: proc (data_str: string,  data_ptr: ^int)  -> (res
     num, parsed := strconv.parse_int(data_str[data_ptr^:],  n = &len_num)
     if (num == 0 && len_num == 0 && !parsed){
         return "", Store_Error.Decoding_Error_Missing_Length
+    }
+    
+    if data_ptr^+len_num >= len(data_str) {
+        return "", Store_Error.Truncated_Entry    
     }
 
     data_ptr^ += len_num 
@@ -340,7 +345,6 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     
     temp, temp_err := os.create_temp_file(temp_dir, "kvstore_sync_temp")
     if temp_err != os.ERROR_NONE{
-        os.close(temp)
         return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
 
@@ -395,7 +399,6 @@ sync :: proc (store: ^KVStore) -> Store_Error {
 
     sync_err = os.sync(data_folder)
     if sync_err != os.ERROR_NONE {
-        os.close(temp)
         return Store_Error.Sync_Error
     }
     return Store_Error.None
