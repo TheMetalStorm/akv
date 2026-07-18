@@ -6,6 +6,10 @@ import "core:mem"
 import "../../kvstore"
 
 main :: proc (){
+
+    // --------------------------------------------------------------------------------------------
+    // Only here for development debugging purposes 
+    
     when ODIN_DEBUG {
         track: mem.Tracking_Allocator
         mem.tracking_allocator_init(&track, context.allocator)
@@ -27,6 +31,7 @@ main :: proc (){
             mem.tracking_allocator_destroy(&track)
         }
 	}
+    // --------------------------------------------------------------------------------------------
 
     // KV Store base path can be specified as an argument, otherwise defaults to "."
     store, err := kvstore.make_store("./usagedb")

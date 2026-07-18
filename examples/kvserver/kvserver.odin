@@ -34,6 +34,10 @@ HELP_MESSAGE : string : "Commands:\n" +
 	"HELP - Display this help message\n"
 
 main :: proc() {
+
+	// --------------------------------------------------------------------------------------------
+    // Only here for development debugging purposes 
+	
     track: mem.Tracking_Allocator
     
     when ODIN_DEBUG {
@@ -56,6 +60,7 @@ main :: proc() {
         }
         mem.tracking_allocator_destroy(&track)
     }
+	// --------------------------------------------------------------------------------------------
 
 	server, server_ok := init_server()
 	if !server_ok{
