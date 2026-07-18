@@ -5,14 +5,12 @@ import "core:os"
 import "core:strings"
 import "base:runtime"
 import "core:sync"
-import "core:fmt"
 import "core:sys/posix"
 
 // Currently only a Unix implementation is provided, but it should be easy to add a Windows implementation if needed.
 // NOTE: We use length-prefixed encoding to store the data in the format "len(data):data"
 // EXAMPLE: 5:hello5:world
 
-// TODO: instead of aprint we should use os path methods
 KVStore :: struct {
     base_path: string,
     mutex: sync.Mutex,
@@ -23,6 +21,7 @@ KVStore :: struct {
 Store_Error :: enum {
 	None = 0,
 	Empty_Base_Path_Error,
+    Path_Error,
     Base_Path_Points_At_File_Error,
     Could_Not_Create_Base_Path_Folder_Error,
 	File_Error,
@@ -43,6 +42,9 @@ Store_Error :: enum {
 }
 
 @(private="file") STORE_NAME : string : "data.db"
+@(private="file") STORE_LOCK_NAME : string : "data.db.lock"
+@(private="file") STORE_BAK_NAME : string : "data.db.bak"
+
 @(private="file") LEN_DELIMITER : string : ":"
 
 
@@ -69,14 +71,16 @@ parse_length_encoded_string :: proc (data_str: string,  data_ptr: ^int)  -> (res
     return ret, Store_Error.None
 }
 
-//TODO: Makee Paths windows compatible 
 // build_index reads the data from the file and builds the in-memory index of key-value pairs.
 // Returns:
 // - error: If an error occurred during indexing, otherwise returns Store_Error.None
 @(private="file")
 build_index :: proc(store: ^KVStore) -> Store_Error {
 
-    lock_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".lock", sep = "")
+    lock_file_path, lock_file_err := os.join_path({store.base_path, STORE_LOCK_NAME}, context.allocator)
+    if lock_file_err != runtime.Allocator_Error.None {
+        return Store_Error.Path_Error
+    }
     defer delete(lock_file_path)
 
     cstr := strings.clone_to_cstring(lock_file_path)
@@ -107,8 +111,12 @@ build_index :: proc(store: ^KVStore) -> Store_Error {
         posix.fcntl(fd, posix.FCNTL_Cmd.SETLK, &unlock)
     }
 
-    store_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, sep = "")
+    store_file_path, store_file_err := os.join_path({store.base_path, STORE_NAME}, context.allocator)
+    if store_file_err != runtime.Allocator_Error.None {
+        return Store_Error.Path_Error
+    }
     defer delete(store_file_path)
+
     if !os.exists(store_file_path){
         f, err := os.create(store_file_path)
         if err != os.ERROR_NONE {
@@ -274,7 +282,10 @@ sync :: proc (store: ^KVStore) -> Store_Error {
     sync.mutex_lock(&store.mutex)
     defer sync.mutex_unlock(&store.mutex)
     
-    lock_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".lock", sep = "")
+    lock_file_path, err := os.join_path({store.base_path, STORE_LOCK_NAME}, context.allocator)
+    if err != runtime.Allocator_Error.None {
+        return Store_Error.Path_Error
+    }
     defer delete(lock_file_path)
 
     cstr := strings.clone_to_cstring(lock_file_path)
@@ -333,13 +344,19 @@ sync :: proc (store: ^KVStore) -> Store_Error {
         return  Store_Error.Could_Not_Create_Store_Backup_Error
     }
 
-    bak_file_path := fmt.aprint(store.base_path, "/", STORE_NAME, ".bak", sep = "")
+    bak_file_path, bak_err := os.join_path({store.base_path, STORE_BAK_NAME}, context.allocator)
+    if bak_err != runtime.Allocator_Error.None {
+        return Store_Error.Path_Error
+    }
     defer delete(bak_file_path)
     
-    file_path := fmt.aprint(store.base_path, "/", STORE_NAME, sep = "")
+    file_path, file_path_err := os.join_path({store.base_path, STORE_NAME},context.allocator)
+    if file_path_err != runtime.Allocator_Error.None {
+        return Store_Error.Path_Error
+    }
     defer delete(file_path)
 
-    copy_err := os.copy_file( bak_file_path, file_path)
+    copy_err := os.copy_file(bak_file_path, file_path)
 
     if copy_err != os.ERROR_NONE{
         os.close(temp)
