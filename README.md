@@ -6,13 +6,27 @@ Currently in development, not production ready
 
 ## Features
 - [x] Concurrent Key-Value Store Library in a single file 
+- [x] OS-level file locking (`flock`) to prevent multi-process data corruption.
+- [x] Atomic file replacement via an interim temporary file swap to protect against crash corruption.
 - [x] Usage Example
 - [x] Multithreaded Server Example
 
-## TODO
-- [x] Implement OS-level file locking (`flock` / `LockFileEx`) to prevent multi-process data corruption.
-- [x] Implement atomic file replacement via an interim temporary file swap to protect against crash corruption.
-- [ ] Implement support for Windows
+## May Be Implemented in the Future
+- [ ] Support for Windows Platform
+- [ ] Storage Access Control
+- [ ] Multiple running instances
+
+## Running the Examples
+
+```sh
+# Run the usage example
+odin run examples/usage
+
+# Run the multithreaded TCP server (requires IP and port args)
+odin run examples/kvserver -- 127.0.0.1 8080
+```
+
+Connect to the server with `telnet 127.0.0.1 8080` and use commands: `PUT key value`, `GET key`, `DEL key`, `HELP`.
 
 ## How it works
 
@@ -21,19 +35,58 @@ Currently in development, not production ready
 3. **Memory Ownership:** Because Odin lacks garbage collection, string management is explicit. `read` returns a clone of the value that the caller must free.
 4. **Persistence:** Changes are only persisted to disk when you explicitly call `sync()`.
 
+
+## Usage
+
+```odin
+package main
+
+import "core:fmt"
+import "kvstore"
+
+main :: proc() {
+    store, err := kvstore.make_store("./mydb")
+    if err != kvstore.Store_Error.None {
+        fmt.println("Failed to create KV store:", err)
+        return
+    }
+    defer kvstore.deallocate(store)
+
+    kvstore.write(store, "hello", "world")
+    kvstore.write(store, "foo", "bar")
+
+    if value, ok := kvstore.read(store, "hello"); ok == kvstore.Store_Error.None {
+        defer delete(value)
+        fmt.println("hello =", value)
+    }
+
+    if kvstore.key_exists(store, "foo") {
+        kvstore.remove(store, "foo")
+    }
+
+    kvstore.sync(store)
+}
+```
+
 ## API Reference
 
-### `make_store(base_path: string) -> (^KVStore, Store_Error)`
+### `make_store(base_path:= ".", allocator := context.allocator) -> (^KVStore, Store_Error)`
 Initializes the store in the given base path. **Note:** This should only be called once on your main thread during initialization.
 
 ### `read(store: ^KVStore, key: string) -> (string, Store_Error)`
 Thread-safe read. Returns a cloned copy of the value string. *The caller is responsible for freeing this string.*
 
 ### `write(store: ^KVStore, key: string, value: string) -> Store_Error`
-Thread-safe insert or update. Returns an error if the key already exists.
+Thread-safe insert. Returns `Key_Already_Exists_Error` if the key already exists.
 
 ### `remove(store: ^KVStore, key: string) -> Store_Error`
 Thread-safe deletion of a key and its value from the store.
 
 ### `sync(store: ^KVStore) -> Store_Error`
 Flushes the in-memory map back to disk.
+
+### `key_exists(store: ^KVStore, key: string) -> bool`
+Thread-safe check if a key exists in the store.
+
+### `deallocate(store: ^KVStore)`
+Frees all memory used by the store. Must be called when done.
